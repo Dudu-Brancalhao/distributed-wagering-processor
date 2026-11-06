@@ -190,10 +190,6 @@ bun run test:concurrency
 
 Cobre, com 3 processos reais da aplicação, T-C1 (a mesma aposta 50 vezes em paralelo), T-C2 (o cenário obrigatório) e T-C3 (carteiras distintas em paralelo). Os demais cenários da especificação (worker morto entre o commit e o ack, dois publicadores no mesmo outbox, `REFUND`/`ROLLBACK` antes da referência via SQS e reinício com prova de consistência) foram cortados; ver Limitações conhecidas em `ARCHITECTURE.md`.
 
-## Usando LocalStack no lugar do MiniStack
-
-O código fala com qualquer endpoint compatível com SQS. Para trocar, substitua o serviço `sqs` do `docker-compose.yml` pela imagem do LocalStack, exponha a porta `4566` e informe `LOCALSTACK_AUTH_TOKEN` (exigido pelo LocalStack desde a versão 2026.03). `SQS_ENDPOINT` continua `http://sqs:4566` dentro do Compose e `http://localhost:4566` fora dele.
-
 ## Solução de problemas
 
 | Sintoma | Causa provável e solução |
