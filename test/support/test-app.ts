@@ -1,8 +1,10 @@
 import { Writable } from "node:stream";
 import type { INestApplication } from "@nestjs/common";
 import { Test, type TestingModuleBuilder } from "@nestjs/testing";
+import type { DestinationStream } from "pino";
 import { AppModule } from "../../src/app.module";
 import { createApp } from "../../src/bootstrap";
+import type { AppConfig } from "../../src/infrastructure/config/config.schema";
 import { createMetricsRegistry } from "../../src/infrastructure/observability/metrics-registry";
 import { NestLoggerAdapter } from "../../src/infrastructure/observability/nest-logger.adapter";
 import { createPino } from "../../src/infrastructure/observability/pino-logger";
@@ -60,20 +62,27 @@ export async function startCustomizedTestApp(
   overrides: Record<string, string>,
   customize: (builder: TestingModuleBuilder) => TestingModuleBuilder,
 ): Promise<TestApp> {
-  const config = testConfig(overrides);
   const logs = captureLogs();
+  return listen(await createCustomizedApp(testConfig(overrides), customize, logs.sink), logs.lines);
+}
+
+/** Builds the application like `createApp`, with providers replaced through `customize`, without listening. */
+export async function createCustomizedApp(
+  config: AppConfig,
+  customize: (builder: TestingModuleBuilder) => TestingModuleBuilder,
+  destination?: DestinationStream,
+): Promise<INestApplication> {
   const logger = createPino({
     level: config.LOG_LEVEL,
     instanceId: config.INSTANCE_ID,
     roles: config.APP_ROLES,
-    destination: logs.sink,
+    destination,
   });
   const registry = createMetricsRegistry(config.INSTANCE_ID);
   const moduleRef = await customize(
     Test.createTestingModule({ imports: [AppModule.forRoot({ config, logger, registry })] }),
   ).compile();
-  const app = moduleRef.createNestApplication({ logger: new NestLoggerAdapter(logger) });
-  return listen(app, logs.lines);
+  return moduleRef.createNestApplication({ logger: new NestLoggerAdapter(logger) });
 }
 
 function captureLogs() {

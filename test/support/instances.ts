@@ -7,28 +7,45 @@ import { TEST_DATABASE_URL } from "./test-config";
 const PROJECT_ROOT = join(import.meta.dir, "..", "..");
 const READY_TIMEOUT_MS = 30_000;
 
+export interface SpawnOptions {
+  /** `APP_ROLES` of every process; the API role alone by default. */
+  readonly roles?: string;
+  /** Extra environment, such as the queue names of the test and shortened intervals. */
+  readonly env?: Readonly<Record<string, string>>;
+  /** Script run instead of `src/main.ts`, such as a crash entrypoint of `test/support/entrypoints`. */
+  readonly entrypoint?: string;
+}
+
 export interface Instances {
   /** The instance that serves request number `index`, spreading requests round-robin. */
   pick(index: number): HttpClient;
+  /** Sends `signal` to every process and resolves once all of them have exited. */
+  kill(signal: NodeJS.Signals): Promise<void>;
+  /** Resolves once every process has exited, with the signal that ended each one (`null` for a normal exit). */
+  exited(): Promise<Subprocess["signalCode"][]>;
   close(): Promise<void>;
 }
 
 /**
- * Spawns `count` separate OS processes of the real application (`bun src/main.ts`, API role) on distinct ports against
- * the test database, and resolves once every one answers `/health/ready` (spec 3.21).
+ * Spawns `count` separate OS processes of the real application (`bun src/main.ts` unless another entrypoint is given)
+ * on distinct ports against the test database, and resolves once every one answers `/health/ready` (spec 3.21).
  */
-export async function spawnInstances(count: number): Promise<Instances> {
+export async function spawnInstances(count: number, options: SpawnOptions = {}): Promise<Instances> {
   const processes: Subprocess[] = [];
   const clients: HttpClient[] = [];
+  const kill = async (signal: NodeJS.Signals) => {
+    for (const child of processes) child.kill(signal);
+    await Promise.all(processes.map((child) => child.exited));
+  };
   try {
     for (let index = 1; index <= count; index++) {
       const port = freePort();
-      processes.push(spawnApp(port, `concurrency-${index}`));
+      processes.push(spawnApp(port, `concurrency-${index}`, options));
       clients.push(httpClient(`http://127.0.0.1:${port}`));
     }
     await Promise.all(clients.map(waitUntilReady));
   } catch (error) {
-    await stopAll(processes);
+    await kill("SIGTERM");
     throw error;
   }
   return {
@@ -37,20 +54,26 @@ export async function spawnInstances(count: number): Promise<Instances> {
       if (!client) throw new Error("no instance spawned");
       return client;
     },
-    close: () => stopAll(processes),
+    kill,
+    async exited() {
+      await Promise.all(processes.map((child) => child.exited));
+      return processes.map((child) => child.signalCode);
+    },
+    close: () => kill("SIGTERM"),
   };
 }
 
-function spawnApp(port: number, instanceId: string): Subprocess {
-  return Bun.spawn(["bun", "src/main.ts"], {
+function spawnApp(port: number, instanceId: string, options: SpawnOptions): Subprocess {
+  return Bun.spawn(["bun", options.entrypoint ?? "src/main.ts"], {
     cwd: PROJECT_ROOT,
     env: {
       ...process.env,
       DATABASE_URL: TEST_DATABASE_URL,
-      APP_ROLES: "api",
+      APP_ROLES: options.roles ?? "api",
       PORT: String(port),
       INSTANCE_ID: instanceId,
       LOG_LEVEL: "warn",
+      ...options.env,
     },
     stdout: "ignore",
     stderr: "inherit",
@@ -74,9 +97,4 @@ function waitUntilReady(client: HttpClient): Promise<void> {
     },
     { timeoutMs: READY_TIMEOUT_MS },
   );
-}
-
-async function stopAll(processes: readonly Subprocess[]): Promise<void> {
-  for (const child of processes) child.kill("SIGTERM");
-  await Promise.all(processes.map((child) => child.exited));
 }
