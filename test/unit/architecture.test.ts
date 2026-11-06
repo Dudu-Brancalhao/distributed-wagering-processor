@@ -2,10 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { Glob } from "bun";
+import { preProcessFile } from "typescript";
 
 const ROOT = resolve(import.meta.dir, "../..");
 const SRC = join(ROOT, "src");
-const transpiler = new Bun.Transpiler({ loader: "ts" });
+
+/** Collects every module specifier, including type-only, side-effect, require() and dynamic imports. */
+function importSpecifiers(content: string): string[] {
+  return preProcessFile(content, true, true).importedFiles.map((entry) => entry.fileName);
+}
 
 interface SourceFile {
   readonly path: string;
@@ -17,7 +22,7 @@ function sources(layer: string): SourceFile[] {
   return [...new Glob(`${layer}/**/*.ts`).scanSync({ cwd: SRC })].map((file) => {
     const path = join(SRC, file);
     const content = readFileSync(path, "utf8");
-    const imports = transpiler.scanImports(content).map((entry) => entry.path);
+    const imports = importSpecifiers(content);
     return { path, content, imports };
   });
 }
@@ -37,6 +42,25 @@ function violations(layer: string, allowed: (target: string) => boolean): string
 }
 
 describe("architecture (P-1.2)", () => {
+  test("import collection sees type-only, side-effect, require() and dynamic imports", () => {
+    const fixture = [
+      'import type { AppConfig } from "../../infrastructure/config/config.schema";',
+      'import "../../infrastructure/side-effect";',
+      'export type { Port } from "../../interfaces/port";',
+      'const legacy = require("../../infrastructure/legacy");',
+      'const lazy = await import("../../infrastructure/lazy");',
+    ].join("\n");
+    expect(importSpecifiers(fixture).sort()).toEqual(
+      [
+        "../../infrastructure/config/config.schema",
+        "../../infrastructure/side-effect",
+        "../../interfaces/port",
+        "../../infrastructure/legacy",
+        "../../infrastructure/lazy",
+      ].sort(),
+    );
+  });
+
   test("the domain imports only the domain", () => {
     expect(violations("domain", (resolved) => resolved.startsWith("domain/"))).toEqual([]);
   });
