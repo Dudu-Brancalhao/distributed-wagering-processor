@@ -54,3 +54,10 @@ export function checkWalletsAfterEach(): Set<string> {
   });
   return touched;
 }
+
+/** Number of DEBIT ledger entries of the wallet: the "exactly one debit" assertion of the race scenarios. */
+export async function debitCount(walletId: string): Promise<number> {
+  const [{ count }] = await sql`
+    SELECT COUNT(*)::int AS count FROM wallet_ledger_entries WHERE wallet_id = ${walletId} AND direction = 'DEBIT'`;
+  return count;
+}

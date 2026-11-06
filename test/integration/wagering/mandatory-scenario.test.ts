@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { sql } from "../../support/sql";
 import { startTestApp, type TestApp } from "../../support/test-app";
 import { createWallet, newProviderId, submit, wagerBody } from "../../support/wagering-requests";
-import { checkWalletsAfterEach } from "../../support/wallet-consistency";
+import { checkWalletsAfterEach, debitCount } from "../../support/wallet-consistency";
 
 /**
  * Challenge section 8, in process: requests race over real HTTP connections and real PostgreSQL row locks. The
@@ -18,12 +17,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await app.close();
 });
-
-async function debitCount(walletId: string): Promise<number> {
-  const [{ count }] = await sql`
-    SELECT COUNT(*)::int AS count FROM wallet_ledger_entries WHERE wallet_id = ${walletId} AND direction = 'DEBIT'`;
-  return count;
-}
 
 describe("concurrent bets on one wallet", () => {
   test("100.00 BRL and two 80.00 bets at once: one PROCESSED, one INSUFFICIENT_FUNDS, 20.00, one debit", async () => {

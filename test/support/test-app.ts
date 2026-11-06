@@ -15,16 +15,35 @@ export interface HttpResponse {
   readonly body: any;
 }
 
-export interface TestApp {
-  readonly app: INestApplication;
+/** JSON requests against one running application, in process or spawned. */
+export interface HttpClient {
   readonly baseUrl: string;
-  readonly logLines: string[];
   request(
     method: string,
     path: string,
     options?: { body?: unknown; headers?: Record<string, string> },
   ): Promise<HttpResponse>;
+}
+
+export interface TestApp extends HttpClient {
+  readonly app: INestApplication;
+  readonly logLines: string[];
   close(): Promise<void>;
+}
+
+export function httpClient(baseUrl: string): HttpClient {
+  return {
+    baseUrl,
+    async request(method, path, { body, headers = {} } = {}) {
+      const response = await fetch(`${baseUrl}${path}`, {
+        method,
+        headers: { "content-type": "application/json", ...headers },
+        body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body),
+      });
+      const text = await response.text();
+      return { status: response.status, headers: response.headers, body: text ? JSON.parse(text) : undefined };
+    },
+  };
 }
 
 /** The real application (every adapter real) listening on a random port, with its log lines captured. */
@@ -70,20 +89,5 @@ function captureLogs() {
 
 async function listen(app: INestApplication, logLines: string[]): Promise<TestApp> {
   await app.listen(0);
-  const baseUrl = await app.getUrl();
-  return {
-    app,
-    baseUrl,
-    logLines,
-    async request(method, path, { body, headers = {} } = {}) {
-      const response = await fetch(`${baseUrl}${path}`, {
-        method,
-        headers: { "content-type": "application/json", ...headers },
-        body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body),
-      });
-      const text = await response.text();
-      return { status: response.status, headers: response.headers, body: text ? JSON.parse(text) : undefined };
-    },
-    close: () => app.close(),
-  };
+  return { ...httpClient(await app.getUrl()), app, logLines, close: () => app.close() };
 }
