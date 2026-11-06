@@ -5,7 +5,7 @@ import { Glob } from "bun";
 
 const ROOT = resolve(import.meta.dir, "../..");
 const SRC = join(ROOT, "src");
-const IMPORT = /(?:^|\n)\s*(?:import|export)\s[^;]*?from\s+["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/g;
+const transpiler = new Bun.Transpiler({ loader: "ts" });
 
 interface SourceFile {
   readonly path: string;
@@ -17,7 +17,7 @@ function sources(layer: string): SourceFile[] {
   return [...new Glob(`${layer}/**/*.ts`).scanSync({ cwd: SRC })].map((file) => {
     const path = join(SRC, file);
     const content = readFileSync(path, "utf8");
-    const imports = [...content.matchAll(IMPORT)].map((match) => match[1] ?? match[2] ?? "");
+    const imports = transpiler.scanImports(content).map((entry) => entry.path);
     return { path, content, imports };
   });
 }
@@ -58,6 +58,10 @@ describe("architecture (P-1.2)", () => {
   });
 });
 
+/**
+ * E-01 and E-06 are deliberate text checks mandated by the spec (T-U7). They guard against obvious regressions;
+ * money precision is proven behaviorally by the numeric(20,2) round-trip test in money.test.ts.
+ */
 describe("static acceptance checks", () => {
   test("E-01: money code never uses JavaScript numbers", () => {
     const offenders = sources("domain/money").filter((file) =>

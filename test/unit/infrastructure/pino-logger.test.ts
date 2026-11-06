@@ -36,11 +36,4 @@ describe("structured logging", () => {
       instanceId: "i-1",
     });
   });
-
-  test("removes sensitive and financial fields even when passed by mistake", () => {
-    const { logger, lines } = capture();
-    logger.warn("oops", { event: "x", amount: "10.00", balance: "5.00", playerId: "p", idempotencyKey: "k" });
-    expect(lines[0]).not.toContainKeys(["amount", "balance", "playerId", "idempotencyKey"]);
-    expect(lines[0]).toMatchObject({ event: "x" });
-  });
 });

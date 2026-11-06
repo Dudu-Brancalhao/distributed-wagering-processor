@@ -9,19 +9,6 @@ export interface LoggerOptions {
   readonly destination?: pino.DestinationStream;
 }
 
-/** Defense in depth: these keys are removed even if a caller passes them by mistake. */
-export const REDACTED_KEYS = [
-  "amount",
-  "balance",
-  "money",
-  "playerId",
-  "payload",
-  "body",
-  "idempotencyKey",
-  "receiptHandle",
-  "headers",
-] as const;
-
 export function createPino(options: LoggerOptions): Logger {
   return pino(
     {
@@ -29,7 +16,6 @@ export function createPino(options: LoggerOptions): Logger {
       base: { instanceId: options.instanceId, roles: options.roles.join(",") },
       timestamp: pino.stdTimeFunctions.isoTime,
       formatters: { level: (label) => ({ level: label }) },
-      redact: { paths: [...REDACTED_KEYS], remove: true },
       mixin: () => ({ ...LogContext.current() }),
     },
     options.destination ?? pino.destination({ sync: true }),

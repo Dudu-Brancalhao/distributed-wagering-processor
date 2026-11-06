@@ -70,6 +70,18 @@ describe("Money arithmetic", () => {
     expect(brl("999999999999999999.99").subtract(brl("0.01")).toJSON().amount).toBe("999999999999999999.98");
   });
 
+  test("round-trips the numeric(20,2) maximum exactly through add, subtract and negate", () => {
+    const max = "999999999999999999.99";
+    const big = brl(max);
+    expect(big.add(Money.zero("BRL")).toJSON().amount).toBe(max);
+    expect(big.subtract(brl("0.00")).toJSON().amount).toBe(max);
+    expect(big.negate().toJSON().amount).toBe(`-${max}`);
+    expect(big.negate().negate().toJSON().amount).toBe(max);
+    expect(Money.zero("BRL").subtract(big).toJSON().amount).toBe(`-${max}`);
+    expect(brl("999999999999999999.98").add(brl("0.01")).toJSON().amount).toBe(max);
+    expect(big.subtract(brl("999999999999999999.98")).toJSON().amount).toBe("0.01");
+  });
+
   test("returns new instances and never mutates operands", () => {
     const a = brl("10.00");
     const b = brl("2.50");

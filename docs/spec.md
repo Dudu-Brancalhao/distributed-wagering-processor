@@ -968,7 +968,7 @@ Each item is a decision the challenge leaves to the candidate or leaves ambiguou
 
 ## 5. Task breakdown
 
-Ten slices, one PR each, built bottom-up. Each slice keeps `bun run check` green and ships its tests. A slice starts only after the open questions it depends on are decided. Every slice emits the logs and metrics of its own components through the `AppLogger` and `WageringMetrics` ports set up in S-01. S-08 adds only the samplers, the redaction config and the consolidated checks. Size is relative effort (S < M < L), not calendar time.
+Ten slices, built bottom-up and shipped in the 5 PR groups listed below. Each slice keeps `bun run check` green and ships its tests. A slice starts only after the open questions it depends on are decided. Every slice emits the logs and metrics of its own components through the `AppLogger` and `WageringMetrics` ports set up in S-01. S-08 adds only the samplers, the redaction config and the consolidated checks. Size is relative effort (S < M < L), not calendar time.
 
 | Slice | Content | Requirements | Acceptance checks (tests) | Depends on | Size |
 |---|---|---|---|---|---|
