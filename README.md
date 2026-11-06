@@ -12,7 +12,7 @@ Serviço de carteira e processamento de apostas (desafio técnico Jungle Gaming)
 
 ## Estado da implementação
 
-A entrega foi dividida em PRs por slice (seção 5 de `docs/spec.md`). Este README descreve o que está na branch principal; o que ficou de fora está em [`ARCHITECTURE.md`, Limitações conhecidas](ARCHITECTURE.md#21-limitações-conhecidas).
+A entrega foi dividida em PRs por slice (seção 5 de `docs/spec.md`). Este README descreve o que está na branch principal; o que ficou de fora está em [`ARCHITECTURE.md`, Limitações conhecidas](ARCHITECTURE.md#18-limitações-conhecidas).
 
 | Parte | Slices | Situação |
 |---|---|---|
@@ -192,7 +192,7 @@ Cobre, com 3 processos reais da aplicação, T-C1 (a mesma aposta 50 vezes em pa
 
 ## Usando LocalStack no lugar do MiniStack
 
-O código fala com qualquer endpoint compatível com SQS. Para trocar, substitua o serviço `sqs` do `docker-compose.yml` pela imagem do LocalStack, exponha a porta `4566` e informe `LOCALSTACK_AUTH_TOKEN` (exigido pelo LocalStack desde a versão 2026.03). `SQS_ENDPOINT` continua `http://sqs:4566` dentro do Compose e `http://localhost:4566` fora dele. Apenas o MiniStack é usado nos testes.
+O código fala com qualquer endpoint compatível com SQS. Para trocar, substitua o serviço `sqs` do `docker-compose.yml` pela imagem do LocalStack, exponha a porta `4566` e informe `LOCALSTACK_AUTH_TOKEN` (exigido pelo LocalStack desde a versão 2026.03). `SQS_ENDPOINT` continua `http://sqs:4566` dentro do Compose e `http://localhost:4566` fora dele.
 
 ## Solução de problemas
 

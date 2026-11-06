@@ -50,7 +50,7 @@ Todas as `OQ-xx` foram decididas em 2026-11-06; alternativas na [seção 4 de `d
 | `FAILED` (OQ-15) | Só na retentativa de `PENDING_REFERENCE` com erro permanente; sem evento | No caminho síncrono o erro aborta tudo e o chamador reenvia | Visível só por log, métrica e consulta |
 | Implantação (OQ-05) | Uma imagem, papéis por `APP_ROLES`, 3 instâncias no Compose | Mantém a fronteira transacional única; separar é só configuração | Um único deployable |
 | Autenticação (OQ-01) | Guard no-op + `ProviderIdentityPort`; desenho OIDC documentado | Vale 0 pontos e o enunciado aceita; tempo vai para áreas pontuadas | Nenhum provedor é autenticado |
-| Emulador SQS (OQ-02) | MiniStack | O LocalStack exige token desde 2026.03; o MiniStack passou nas checagens FIFO | LocalStack só documentado |
+| Emulador SQS (OQ-02) | MiniStack | O enunciado aceita LocalStack ou MiniStack; o LocalStack exige token desde 2026.03 e o MiniStack (MIT) passou nas checagens FIFO | - |
 | Escopo (OQ-06, OQ-12, OQ-21) | Sem diferenciais; este documento em pt-BR; ledger do mais novo para o mais antigo | Foco nos 100 pontos avaliados; público é a banca | - |
 
 ## 3. Estado da implementação
@@ -287,8 +287,6 @@ Um `REFUND`, `ROLLBACK`, `WIN` ou `LOSS` cuja referência ainda não existe vira
 
 **Regras** ([spec 3.21](docs/spec.md#321-test-strategy)): infraestrutura real, sem mocks de `pg`, MikroORM ou SQS; isolamento sem limpeza (cada teste cria seus dados UUIDv7 e cada arquivo usa filas próprias, nada é truncado); no `afterEach`, `test/support/wallet-consistency.ts` verifica que saldo armazenado bate com o ledger, versões contíguas, encadeamento `balance_before`/`balance_after` e contagem de lançamentos; sem sleeps fixos, corridas partem de uma barreira; nenhum gancho de teste no código de produção.
 
-<a id="21-limitações-conhecidas"></a>
-
 ## 18. Limitações conhecidas
 
 **Exigido pelo enunciado e não entregue (ou parcial):**
@@ -303,13 +301,6 @@ Um `REFUND`, `ROLLBACK`, `WIN` ou `LOSS` cuja referência ainda não existe vira
 
 Os itens 1 a 4 de concorrência têm teste com 3 processos reais da aplicação: T-C1 (a mesma aposta 50 vezes), T-C2 (o cenário obrigatório) e T-C3 (carteiras distintas em paralelo), em `bun run test:concurrency`.
 
-**Fora do escopo do enunciado:**
-
-- **Sem CI:** nenhum workflow roda lint, tipos ou testes automaticamente; o portão de qualidade é local (`bun run check`, `bun run test`).
-- **Sem teste de carga:** diferencial opcional, não agendado (OQ-06).
-- **Sem OpenAPI:** a API está descrita na seção 12, em [spec 3.13](docs/spec.md#313-http-api-and-status-mapping) e no `README.md`.
-- **Sem IdP real:** autenticação vale 0 pontos e o enunciado aceita o ponto de extensão no-op; nenhum provedor é autenticado e Keycloak ou Zitadel só estão no desenho (seção 16).
-
 **Limitações do desenho:**
 
 - **Vazão por carteira:** limitada pela seção crítica sob o lock de linha. Carteiras diferentes escalam em paralelo; uma única carteira muito quente não.
@@ -319,5 +310,3 @@ Os itens 1 a 4 de concorrência têm teste com 3 processos reais da aplicação:
 - **Eventos:** entrega pelo menos uma vez, sem ordem entre agregados nem entre publicadores; consumidores deduplicam por `eventId` e ordenam eventos de saldo por `walletVersion`. Uma transação de outbox fica aberta por até 5 s durante o envio ao SQS.
 - **Latência de referências pendentes:** uma reversão que chega antes da referência espera o próximo degrau do backoff depois que a referência aparece, sem acordar dependentes na hora.
 - **`FAILED` sem evento:** transações `FAILED` são visíveis por log, métrica e consulta, não por evento de integração.
-- **Double-entry, OpenTelemetry e dashboards:** não construídos (OQ-06).
-- **LocalStack:** documentado como alternativa, mas apenas o MiniStack é testado.
