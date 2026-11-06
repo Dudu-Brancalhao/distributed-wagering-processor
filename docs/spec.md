@@ -1001,7 +1001,7 @@ Budget: the critical path is S-01 to S-04, then S-05/S-06/S-07 in parallel, then
 
 ## Appendix A: Toolchain facts verified for this spec
 
-Lab run on 2026-11-05 in a scratch environment. Docker was not available on the lab host, so PostgreSQL ran from the `embedded-postgres` binaries and MiniStack from its PyPI package. The Compose images themselves are still unverified (first thing S-01 checks).
+Lab run on 2026-11-05 in a scratch environment. Docker was not available on the lab host, so PostgreSQL ran from the `embedded-postgres` binaries and MiniStack from its PyPI package. S-01 later verified the Compose stack on Docker 29.7 / Compose v5.4 (2026-11-06): `postgres:18-alpine`, `ministackorg/ministack:1.5.37` and `oven/bun:1.4.4` pull and run, the `setup` job provisions the three FIFO queues (idempotent on re-run), and `app-1` to `app-3` report healthy and answer `/health/live`; `docker compose stop` exits an instance with code 0.
 
 | Fact | How it was checked | Result |
 |---|---|---|
