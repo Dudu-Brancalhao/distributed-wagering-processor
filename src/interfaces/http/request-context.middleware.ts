@@ -1,6 +1,7 @@
 import type { NestMiddleware } from "@nestjs/common";
 import type { NextFunction, Request, Response } from "express";
 import { LogContext } from "../../infrastructure/observability/log-context";
+import { storeRequestIds } from "./request-ids";
 
 const CORRELATION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 
@@ -12,6 +13,7 @@ export class RequestContextMiddleware implements NestMiddleware {
     const requestId = Bun.randomUUIDv7();
     response.setHeader("X-Correlation-Id", correlationId);
     response.setHeader("X-Request-Id", requestId);
+    storeRequestIds(response, { correlationId, requestId });
     LogContext.run({ correlationId, requestId }, next);
   }
 }

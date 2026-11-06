@@ -30,11 +30,7 @@ export const sqsConfigSchema = z.object({
   SQS_RETRY_MAX_S: positiveInt(60),
 });
 
-export const appConfigSchema = sqsConfigSchema.extend({
-  APP_ROLES: rolesSchema,
-  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
-  INSTANCE_ID: z.string().min(1).default(hostname()),
-  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
+export const databaseConfigSchema = z.object({
   DATABASE_URL: z.url(),
   DB_POOL_MAX: positiveInt(10),
   DB_LOCK_TIMEOUT_MS: positiveInt(2000),
@@ -43,6 +39,13 @@ export const appConfigSchema = sqsConfigSchema.extend({
   DB_IDLE_IN_TRANSACTION_TIMEOUT_MS: positiveInt(10000),
   DB_CONNECT_TIMEOUT_MS: positiveInt(2000),
   DB_QUERY_TIMEOUT_MS: positiveInt(6000),
+});
+
+export const appConfigSchema = sqsConfigSchema.extend(databaseConfigSchema.shape).extend({
+  APP_ROLES: rolesSchema,
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  INSTANCE_ID: z.string().min(1).default(hostname()),
+  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
   LOCK_CONTENTION_THRESHOLD_MS: positiveInt(10),
   OUTBOX_POLL_INTERVAL_MS: positiveInt(500),
   OUTBOX_BATCH_SIZE: z.coerce.number().int().min(1).max(10).default(10),
@@ -56,4 +59,5 @@ export const appConfigSchema = sqsConfigSchema.extend({
 });
 
 export type SqsConfig = z.infer<typeof sqsConfigSchema>;
+export type DatabaseConfig = z.infer<typeof databaseConfigSchema>;
 export type AppConfig = z.infer<typeof appConfigSchema>;
