@@ -34,16 +34,9 @@ A especificação detalhada, com requisitos rastreáveis (`R-xx`), testes (`T-xx
 
 ## 2. Estado da implementação
 
-A entrega segue 5 PRs (seção 5 de `docs/spec.md`). Este documento descreve o desenho decidido e, onde algo ainda não está na branch principal, isso está indicado.
+A entrega segue 5 PRs (seção 5 de `docs/spec.md`); a situação de cada slice está em [`README.md`](README.md#estado-da-implementação). Este documento descreve o desenho decidido e, onde algo ainda não está na branch principal, isso está indicado.
 
-| Parte | Slices | Situação |
-|---|---|---|
-| Esqueleto, Compose, modelo de domínio | S-01, S-02 | Entregue |
-| Schema, persistência, casos de uso e API HTTP | S-03, S-04 | Entregue |
-| Consumidor SQS (com inbox), publicador do outbox, retentativa de `PENDING_REFERENCE` | S-05, S-06, S-07 | Em andamento; descritos aqui conforme a especificação |
-| Observabilidade completa e suíte de concorrência e recuperação | S-08, S-09 | Pendente; descritos aqui conforme a especificação |
-
-As seções 13, 14, 15, 16 e parte das 17 e 19 descrevem componentes desses slices pendentes. A tabela `inbox_messages`, a tabela `outbox_messages` com a escrita das linhas de evento, o `RetrySchedule` e as classes de domínio `InboxMessage` e `OutboxMessage` já estão entregues.
+As seções 13, 14, 15, 16 e parte das 17 e 19 descrevem componentes dos slices S-05 a S-09, ainda não entregues. A tabela `inbox_messages`, a tabela `outbox_messages` com a escrita das linhas de evento, o `RetrySchedule` e as classes de domínio `InboxMessage` e `OutboxMessage` já estão entregues.
 
 ## 3. Visão geral e camadas
 
@@ -57,7 +50,7 @@ Arquitetura hexagonal (ports and adapters) em um único código e uma única ima
 | Adaptadores de saída | `src/infrastructure` | Persistência MikroORM, cliente SQS, logger pino, métricas prom-client, configuração. | aplicação, domínio, frameworks |
 | Raiz de composição | `src/main.ts`, `src/*.module.ts`, `src/roles.ts` | Monta a aplicação Nest para os papéis habilitados. | tudo |
 
-A regra de dependência é verificada por `test/unit/architecture.test.ts`, que lê os imports de cada arquivo. O mesmo teste barra `parseFloat`, `Number(` e `: number` em `src/domain/money`.
+A regra de dependência é verificada por `test/unit/architecture.test.ts`, que lê os imports de cada arquivo. O mesmo teste barra `parseFloat`, `parseInt`, `Number(` e `: number` em `src/domain/money`.
 
 **Papéis de processo.** `APP_ROLES` (padrão `api,consumer,outbox,pending-reference`) escolhe o que cada processo roda: `api` serve HTTP; `consumer` consome `wager-transactions.fifo`; `outbox` publica eventos pendentes; `pending-reference` retenta transações `PENDING_REFERENCE`. Todos os papéis são seguros com qualquer número de instâncias ao mesmo tempo. `/health/*` e `/metrics` existem em toda instância.
 
@@ -176,7 +169,7 @@ Em `SubmitWagerTransaction` a mesma transação SQL grava: a `WagerTransaction`,
 | Servidor, por sessão | `lock_timeout`, `statement_timeout`, `transaction_timeout`, `idle_in_transaction_session_timeout` | 2 s, 5 s, 8 s, 10 s |
 | Cliente (pool `pg`) | `connectionTimeoutMillis`, `query_timeout`, `keepAlive` | 2 s, 6 s, ligado |
 
-Os timeouts de cliente são necessários porque um servidor congelado (`docker compose pause`) não dispara timeouts de servidor. `pg-error-classifier.ts` traduz os erros de conexão e timeout do cliente e os SQLSTATEs `55P03`, `40P01`, `40001`, `08*`, `57P01` a `57P03`, `57014`, `25P04` e `53300` para `TransientInfrastructureError` (HTTP 503, retry no SQS). Violações de integridade fora das corridas documentadas indicam bug ou overflow: HTTP 500, erro permanente no SQS e `FAILED` no retentador.
+Os timeouts de cliente são necessários porque um servidor congelado (`docker compose pause`) não dispara timeouts de servidor. `pg-error-classifier.ts` traduz os erros de conexão e timeout do cliente e os SQLSTATEs `55P03`, `40P01`, `40001`, `08*`, `57P01` a `57P03`, `57014`, `25P03`, `25P04` e `53300` para `TransientInfrastructureError` (HTTP 503, retry no SQS). Violações de integridade fora das corridas documentadas indicam bug ou overflow: HTTP 500, erro permanente no SQS e `FAILED` no retentador.
 
 ## 8. Estratégia de concorrência
 
