@@ -8,16 +8,15 @@ Serviço de carteira e processamento de apostas (desafio técnico Jungle Gaming)
 
 ## Estado da implementação
 
-A entrega está dividida em 5 PRs (seção 5 de `docs/spec.md`). Este README descreve o sistema completo conforme a especificação e indica o que ainda não está na branch principal.
+A entrega foi dividida em PRs por slice (seção 5 de `docs/spec.md`). Este README descreve o que está na branch principal; o que ficou de fora está em [`ARCHITECTURE.md`, Limitações conhecidas](ARCHITECTURE.md#21-limitações-conhecidas).
 
 | Parte | Slices | Situação |
 |---|---|---|
 | Esqueleto, Compose, modelo de domínio | S-01, S-02 | Entregue |
 | Schema PostgreSQL, persistência, casos de uso e API HTTP | S-03, S-04 | Entregue |
-| Consumidor SQS, publicador do outbox, retentativa de `PENDING_REFERENCE` | S-05, S-06, S-07 | Em andamento |
-| Observabilidade completa e suíte de concorrência e recuperação | S-08, S-09 | Pendente |
-
-Enquanto S-05 a S-07 não chegam, os papéis `consumer`, `outbox` e `pending-reference` são aceitos em `APP_ROLES`, mas ainda não registram workers, e o `GET /health/ready` verifica apenas o PostgreSQL.
+| Consumidor SQS, publicador do outbox, retentativa de `PENDING_REFERENCE` | S-05, S-06, S-07 | Entregue |
+| Observabilidade | S-08 | Parcial: logs com contexto e métricas entregues; amostrador de profundidade da DLQ e `redact` do pino não construídos |
+| Suíte de concorrência e recuperação | S-09 | Parcial: só a prova de concorrência (T-C1, T-C2), em PR próprio; T-C3 a T-C8 cortados |
 
 ## Pré-requisitos
 
@@ -135,7 +134,7 @@ curl -s "localhost:3003/wallets/$WALLET/ledger" | jq '[.items[] | select(.direct
 
 Resultado esperado: uma resposta `201` com `"status":"PROCESSED"` e outra `422` com `"status":"REJECTED"` e `"failureCode":"INSUFFICIENT_FUNDS"`; saldo final `{"amount":"20.00","currency":"BRL"}`; exatamente `1` lançamento de débito. Repetir as duas chamadas `bet` com os mesmos ids devolve as mesmas respostas com `"idempotentReplay":true` e não muda o saldo nem o ledger.
 
-O mesmo cenário é verificado automaticamente em `test/integration/wagering/mandatory-scenario.test.ts` (em processo, com requisições paralelas reais contra o PostgreSQL). As versões multiprocesso e via SQS (T-C2 em `docs/spec.md`) fazem parte da suíte de concorrência, ainda pendente.
+O mesmo cenário é verificado automaticamente em `test/integration/wagering/mandatory-scenario.test.ts` (em processo, com requisições paralelas reais contra o PostgreSQL). A versão com duas instâncias (T-C2 em `docs/spec.md`) faz parte da prova de concorrência (`bun run test:concurrency`).
 
 ## Scripts
 
@@ -152,7 +151,7 @@ O mesmo cenário é verificado automaticamente em `test/integration/wagering/man
 | `bun run sqs:setup` | Cria as filas SQS de forma idempotente. |
 | `bun run test:unit` | Testes de unidade, em paralelo. |
 | `bun run test:integration` | Testes de integração contra PostgreSQL e MiniStack reais. |
-| `bun run test:concurrency` | Suíte de concorrência e recuperação (pasta `test/concurrency`, chega com S-09). |
+| `bun run test:concurrency` | Prova de concorrência (pasta `test/concurrency`, T-C1 e T-C2). |
 | `bun run test` | Unidade e integração. |
 
 Os scripts que acessam infraestrutura leem a configuração do ambiente (`DATABASE_URL`, `SQS_ENDPOINT` etc.); a lista completa de variáveis, com valores padrão, está na seção 3.19 de `docs/spec.md` e é validada com Zod na inicialização.
@@ -176,7 +175,7 @@ docker compose up -d postgres sqs
 bun run test:integration
 ```
 
-Rodam contra o PostgreSQL e o MiniStack do Compose, sem mocks de `pg`, MikroORM ou do cliente SQS. O preload aplica as migrations no banco `wagering_test` (em `localhost:5432`). Cada teste cria suas próprias carteiras, jogadores e provedores, então nada é truncado entre execuções. Para usar outro banco, defina `TEST_DATABASE_URL`. A cobertura inclui migrations e constraints, atomicidade de carteira, ledger e outbox, idempotência, a API HTTP, reconciliação e o cenário obrigatório.
+Rodam contra o PostgreSQL e o MiniStack do Compose, sem mocks de `pg`, MikroORM ou do cliente SQS. O preload aplica as migrations no banco `wagering_test` (em `localhost:5432`). Cada teste cria suas próprias carteiras, jogadores e provedores, então nada é truncado entre execuções. Para usar outro banco, defina `TEST_DATABASE_URL`. A cobertura inclui migrations e constraints, provisionamento das filas, atomicidade de carteira, ledger e outbox, idempotência, a API HTTP, reconciliação, o cenário obrigatório, deduplicação do inbox, retry e DLQ do consumidor, desligamento gracioso, o publicador do outbox e o retentador de `PENDING_REFERENCE`.
 
 ### Concorrência
 
@@ -185,7 +184,7 @@ docker compose up -d postgres sqs
 bun run test:concurrency
 ```
 
-Previstos na especificação (T-C1 a T-C8) e entregues com S-09: a mesma aposta 50 vezes em paralelo, o cenário obrigatório com duas instâncias, carteiras distintas em paralelo, 3 processos simultâneos, um worker morto entre o commit e o ack, dois publicadores no mesmo outbox, `REFUND`/`ROLLBACK` antes da referência e reinício com prova de consistência final. Os testes sobem processos da aplicação a partir do código-fonte, então o Compose só precisa de `postgres` e `sqs`.
+Cobre T-C1 (a mesma aposta 50 vezes em paralelo) e T-C2 (o cenário obrigatório com duas instâncias). A pasta `test/concurrency` chega com o PR da prova de concorrência; sem ele, o script não encontra testes. Os demais cenários da especificação (T-C3 a T-C8: carteiras distintas em paralelo, 3 processos, worker morto entre o commit e o ack, dois publicadores no mesmo outbox, `REFUND`/`ROLLBACK` antes da referência via SQS e reinício com prova de consistência) foram cortados; ver Limitações conhecidas em `ARCHITECTURE.md`.
 
 ## Usando LocalStack no lugar do MiniStack
 

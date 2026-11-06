@@ -34,9 +34,7 @@ A especificação detalhada, com requisitos rastreáveis (`R-xx`), testes (`T-xx
 
 ## 2. Estado da implementação
 
-A entrega segue 5 PRs (seção 5 de `docs/spec.md`); a situação de cada slice está em [`README.md`](README.md#estado-da-implementação). Este documento descreve o desenho decidido e, onde algo ainda não está na branch principal, isso está indicado.
-
-As seções 13, 14, 15, 16 e parte das 17 e 19 descrevem componentes dos slices S-05 a S-09, ainda não entregues. A tabela `inbox_messages`, a tabela `outbox_messages` com a escrita das linhas de evento, o `RetrySchedule` e as classes de domínio `InboxMessage` e `OutboxMessage` já estão entregues.
+A entrega seguiu PRs por slice (seção 5 de `docs/spec.md`); a situação de cada slice está em [`README.md`](README.md#estado-da-implementação). Os slices S-01 a S-07 (domínio, persistência, API HTTP, consumidor SQS, publicador do outbox e retentador) estão na branch principal. De S-08 e S-09 só parte foi construída; o que ficou de fora está na [seção 21](#21-limitações-conhecidas).
 
 ## 3. Visão geral e camadas
 
@@ -330,9 +328,7 @@ Alternativas descartadas: `200` para replays (diferenciaria replays pelo status,
 
 ## 13. Mensageria: inbox, consumidor SQS e DLQ
 
-> Componente do slice S-05, em andamento. Descrito conforme a especificação.
-
-**Filas** (criadas de forma idempotente por `scripts/setup-sqs.ts`, já entregue): `wager-transactions.fifo` com `VisibilityTimeout=30` e redrive para `wager-transactions-dlq.fifo` após 5 recebimentos, e `wagering-events.fifo` para os eventos do outbox.
+**Filas** (criadas de forma idempotente por `scripts/setup-sqs.ts`): `wager-transactions.fifo` com `VisibilityTimeout=30` e redrive para `wager-transactions-dlq.fifo` após 5 recebimentos, e `wagering-events.fifo` para os eventos do outbox.
 
 **Envelope de entrada:** `{ messageId, type: "WagerTransactionRequested", occurredAt, data: { providerId, externalTransactionId, idempotencyKey, playerId, walletId, roundId, gameId, kind, money, referenceExternalTransactionId? } }`. O `data` passa pelo mesmo schema Zod do corpo HTTP. Produtores devem usar `MessageGroupId = walletId` e `MessageDeduplicationId = messageId`, mas o consumidor não depende de nenhum dos dois.
 
@@ -361,8 +357,6 @@ O lote recebido é agrupado por `MessageGroupId`: grupos rodam em paralelo (até
 - A fila é um canal interno confiável, mas o `providerId` das mensagens passa pela mesma validação de formato e toda busca é escopada por ele.
 
 ## 14. Transactional Outbox
-
-> A escrita das linhas do outbox já está entregue. O publicador é do slice S-06, em andamento, e é descrito conforme a especificação.
 
 **Escrita:** todo caso de uso que produz eventos insere as linhas de `outbox_messages` no seu próprio unit of work. Nada mais envia eventos.
 
@@ -394,8 +388,6 @@ Cada evento é uma subclasse de `IntegrationEvent<T>` com `eventType` e `version
 
 ## 15. Referências fora de ordem e janela de retentativa
 
-> Componente do slice S-07, em andamento. A entrada em `PENDING_REFERENCE` no caminho síncrono já está entregue; o retentador é descrito conforme a especificação.
-
 Um `REFUND`, `ROLLBACK`, `WIN` ou `LOSS` cuja referência ainda não existe é persistido como `PENDING_REFERENCE` (HTTP 202) com `attempts = 0` e `nextAttemptAt = agora + 1 s`, e gera `WagerTransactionPendingReference`.
 
 **Retentador** (papel `pending-reference`), a cada `PENDING_REFERENCE_POLL_INTERVAL_MS`:
@@ -415,15 +407,13 @@ Um `REFUND`, `ROLLBACK`, `WIN` ou `LOSS` cuja referência ainda não existe é p
 
 ## 16. Desligamento gracioso
 
-> Parte do slice S-05, em andamento.
-
 Com `app.enableShutdownHooks()`, ao receber `SIGTERM`: a readiness passa a responder 503; o consumidor para de buscar e aborta o long poll em andamento; mensagens recebidas e não iniciadas voltam a ficar visíveis na hora (`ChangeMessageVisibility(0)`); handlers em andamento têm até `SHUTDOWN_GRACE_MS` (20 s) para confirmar e apagar, e os que passarem do prazo voltam a ficar visíveis (se a transação deles confirmar depois, a reentrega é uma duplicata do inbox); o publicador e o retentador terminam o tick atual; por fim `app.close()` drena as conexões HTTP e fecha o pool. O Compose usa `stop_grace_period: 30s`, acima dos 10 s padrão do Docker.
 
 ## 17. Observabilidade
 
 **Logs:** pino, JSON em stdout, um logger com contexto via AsyncLocalStorage definido pelo middleware HTTP, pelo consumidor (por mensagem) e pelos workers. Cada linha traz `correlationId` e, quando conhecidos, `messageId`, `transactionId`, `walletId` e `providerId`, além de `event` (nome estável como `transaction.processed`), `role` e `instanceId`.
 
-**Nunca são logados:** valores, saldos, `playerId`, corpos de requisição ou mensagem, chaves de idempotência, headers além do correlation id e receipt handles do SQS. Uma lista de `redact` do pino reforça isso (S-08).
+**Nunca são logados:** valores, saldos, `playerId`, corpos de requisição ou mensagem, chaves de idempotência, headers além do correlation id e receipt handles do SQS. A regra é seguida nos pontos de log do código; a lista de `redact` do pino prevista em S-08 não foi construída (seção 21).
 
 **Métricas** (`GET /metrics`):
 
@@ -433,15 +423,15 @@ Com `app.enableShutdownHooks()`, ao receber `SIGTERM`: a readiness passa a respo
 | `wagering_duplicates_total{type}` | duplicatas detectadas (inbox, replay idempotente) |
 | `wagering_idempotency_conflicts_total{source,code}` | payloads conflitantes |
 | `wagering_retries_total{component}` | retentativas (sqs, outbox, pending_reference, unique_race) |
-| `wagering_dlq_messages_total{reason}` e `wagering_dlq_depth{queue}` | mensagens na DLQ |
+| `wagering_dlq_messages_total{reason}` | mensagens enviadas à DLQ pelo consumidor |
 | `wagering_wallet_lock_wait_seconds` e `wagering_lock_conflicts_total{reason}` | espera e conflitos de lock |
 | `wagering_outbox_lag_seconds` | idade da linha mais antiga não publicada |
 | `wagering_processing_duration_seconds{source,kind,outcome}` | latência de processamento |
 | `wagering_reconciliation_divergences_total` | divergências de reconciliação |
 
-As métricas do caminho de submissão HTTP e da reconciliação já estão entregues; as do consumidor, do outbox e do retentador chegam com seus slices, e os amostradores de profundidade da DLQ e de lag do outbox com S-08.
+O lag do outbox é medido a cada tick do publicador. O gauge `wagering_dlq_depth{queue}` previsto na especificação (amostrado de `ApproximateNumberOfMessages`) não foi construído, então mensagens levadas à DLQ pela redrive policy não aparecem em métrica (seção 21).
 
-**Health:** `/health/live` nunca toca dependências. `/health/ready` executa `SELECT 1` no PostgreSQL e, com S-05, `GetQueueAttributes` na fila de entrada, ambos com timeout de 1 s. Hoje a readiness verifica só o PostgreSQL.
+**Health:** `/health/live` nunca toca dependências. `/health/ready` executa `SELECT 1` no PostgreSQL e `GetQueueAttributes` na fila de entrada, ambos com timeout, e responde 503 se algum falhar ou se o processo estiver desligando.
 
 ## 18. Autenticação
 
@@ -468,8 +458,8 @@ As métricas do caminho de submissão HTTP e da reconciliação já estão entre
 | Camada | Pasta | Dependências | Situação |
 |---|---|---|---|
 | Unidade | `test/unit` | nenhuma | Entregue: `Money`, `Wallet`, ledger, `WagerTransaction`, processador de regras, eventos, hash, configuração, logger, borda HTTP e o teste de arquitetura. |
-| Integração | `test/integration` | PostgreSQL e MiniStack do Compose | Entregue para schema e constraints, mappers, provisionamento de filas, atomicidade, idempotência, API HTTP, reconciliação e o cenário obrigatório em processo. Inbox, retry e DLQ e desligamento gracioso chegam com S-05; observabilidade com S-08. |
-| Concorrência | `test/concurrency` | PostgreSQL e MiniStack; sobe processos da aplicação | Pendente (S-09): T-C1 a T-C8. |
+| Integração | `test/integration` | PostgreSQL e MiniStack do Compose | Entregue para schema e constraints, mappers, provisionamento de filas, atomicidade, idempotência, API HTTP, reconciliação, o cenário obrigatório em processo, inbox, retry e DLQ, desligamento gracioso, publicador do outbox e retentador. |
+| Concorrência | `test/concurrency` | PostgreSQL e MiniStack; sobe processos da aplicação | Parcial: T-C1 e T-C2 (`bun run test:concurrency`), em PR próprio; T-C3 a T-C8 cortados. |
 
 **Regras:**
 
@@ -477,8 +467,9 @@ As métricas do caminho de submissão HTTP e da reconciliação já estão entre
 - **Isolamento sem limpeza:** cada teste cria suas próprias carteiras, jogadores e provedores (UUIDv7) e cada arquivo usa filas com nome único. Nada é truncado (o ledger proíbe).
 - **Invariante final:** todo teste que toca carteiras verifica no `afterEach` que o saldo armazenado é igual ao saldo reconstruído pelo ledger, que as versões do ledger são contíguas, que cada `balance_before` é o `balance_after` anterior e que o número de lançamentos bate com as transações processadas que afetam saldo (`test/support/wallet-consistency.ts`).
 - **Determinismo:** sem sleeps fixos para sincronizar; corridas começam de uma barreira compartilhada; atrasos de retry são encurtados por configuração.
-- **Falhas injetadas sem ganchos em produção (S-09):** cenários de queda usam entrypoints de teste que montam a aplicação real e trocam um único provider por um wrapper que faz `SIGKILL` no ponto escolhido. O código de produção não tem chaves de teste.
-- **Corridas reais via SQS (S-09):** as variantes SQS enviam cada mensagem com `MessageGroupId` aleatório e verificam que `wagering_lock_conflicts_total{reason="contended"}` subiu, o que prova que o banco, e não o broker, serializou as operações.
+- **Sem ganchos de teste em produção:** o código de produção não tem chaves de teste; os testes configuram a aplicação real só por variáveis de ambiente e providers.
+
+Os cenários de queda com `SIGKILL` e as variantes de corrida via SQS previstos em S-09 não foram construídos (seção 21).
 
 ## 20. Interpretações e decisões (OQ-01 a OQ-23)
 
@@ -520,6 +511,14 @@ Todas decididas em 2026-11-06. Detalhes e alternativas na seção 4 de `docs/spe
 - **Latência de referências pendentes:** uma reversão que chega antes da referência espera o próximo degrau do backoff depois que a referência aparece, sem acordar dependentes na hora.
 - **Autenticação:** apenas o ponto de extensão no-op; nenhum provedor é autenticado (seção 18).
 - **`FAILED` sem evento:** transações `FAILED` são visíveis por log, métrica e consulta, não por evento de integração.
-- **Double-entry, OpenTelemetry, dashboards, OpenAPI e teste de carga:** não construídos (OQ-06).
+- **Double-entry, OpenTelemetry e dashboards:** não construídos (OQ-06).
 - **LocalStack:** documentado como alternativa, mas apenas o MiniStack é testado.
-- **Entrega parcial:** consumidor SQS, publicador do outbox, retentador, observabilidade completa e suíte de concorrência ainda estão em andamento (seção 2). Este documento passará por uma revisão de exatidão quando esses PRs entrarem.
+- **Autenticação real:** nenhum IdP (Keycloak ou Zitadel) é integrado; só o desenho está documentado (seção 18).
+
+**Cortado por prazo.** Os itens abaixo estão na especificação, mas não foram construídos:
+
+- **Queda depois do commit e reinício:** não há teste automatizado de um worker morto entre o commit e o ack do SQS (T-C5) nem de reinício com prova de consistência final (T-C8). A correção nesses casos se apoia no inbox e na deduplicação, cobertos por testes de integração em processo.
+- **Concorrência além da prova mínima:** só T-C1 e T-C2 existem. Carteiras distintas em paralelo (T-C3), 3 processos simultâneos (T-C4), dois publicadores no mesmo outbox (T-C6) e as variantes de corrida via SQS (T-C7) não têm teste.
+- **Observabilidade incompleta:** sem o amostrador de profundidade da DLQ (`wagering_dlq_depth`) e sem a lista de `redact` do pino (seção 17).
+- **Sem CI:** nenhum workflow roda lint, tipos ou testes automaticamente; o portão de qualidade é local (`bun run check`, `bun run test`).
+- **Sem teste de carga** e **sem OpenAPI** (a API está descrita na seção 12 e no `README.md`).
