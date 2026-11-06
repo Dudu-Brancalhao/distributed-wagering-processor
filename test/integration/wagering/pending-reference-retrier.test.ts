@@ -198,40 +198,12 @@ describe("worker: the retry window runs out", () => {
     expect(replay.body).toMatchObject({ status: "REJECTED", code: "REFERENCE_NOT_FOUND", idempotentReplay: true });
     expect(await walletBalance(app, wallet.id)).toBe("100.00");
   });
-
-  test("a reference that exists but never gets processed ends REJECTED REFERENCE_NOT_PROCESSED", async () => {
-    const { providerId, wallet } = await scenario(app);
-    const refundId = newId();
-    await submitOk(
-      app,
-      wagerBody({
-        providerId,
-        wallet,
-        kind: "REFUND",
-        amount: "10.00",
-        externalTransactionId: refundId,
-        referenceExternalTransactionId: newId(),
-      }),
-      202,
-    );
-    const rollback = await submitOk(
-      app,
-      wagerBody({ providerId, wallet, kind: "ROLLBACK", amount: "10.00", referenceExternalTransactionId: refundId }),
-      202,
-    );
-
-    const settled = await eventually(async () => {
-      const view = (await getTransaction(app, rollback.transactionId)).body;
-      expect(view.status).toBe("REJECTED");
-      return view;
-    });
-    expect(settled.failureCode).toBe("REFERENCE_NOT_PROCESSED");
-    expect(await walletBalance(app, wallet.id)).toBe("100.00");
-  });
 });
 
 /** Ticks driven directly (no worker role), so lock waits and failures are observed deterministically. */
 describe("RetryPendingReferences tick", () => {
+  /** PENDING_REFERENCE_MAX_ATTEMPTS as decided in spec OQ-09, which this application keeps. */
+  const DECIDED_MAX_ATTEMPTS = 20;
   let app: TestApp;
   let retrier: RetryPendingReferences;
   /** Same application with a short `lock_timeout`, for the lock-timeout path. */
@@ -278,6 +250,45 @@ describe("RetryPendingReferences tick", () => {
       session.release();
     };
   }
+
+  test("a reference that exists but stays pending for the whole window ends REJECTED REFERENCE_NOT_PROCESSED", async () => {
+    const { providerId, wallet } = await scenario(app);
+    const refundId = newId();
+    const refund = await submitOk(
+      app,
+      wagerBody({
+        providerId,
+        wallet,
+        kind: "REFUND",
+        amount: "10.00",
+        externalTransactionId: refundId,
+        referenceExternalTransactionId: newId(),
+      }),
+      202,
+    );
+    await sql`UPDATE wager_transactions SET next_attempt_at = '2999-01-01T00:00:00Z' WHERE id = ${refund.transactionId}`;
+    const rollback = await submitOk(
+      app,
+      wagerBody({ providerId, wallet, kind: "ROLLBACK", amount: "10.00", referenceExternalTransactionId: refundId }),
+      202,
+    );
+
+    // The decided window is 20 attempts (spec OQ-09); each tick below uses one of them.
+    for (let attempt = 1; attempt <= DECIDED_MAX_ATTEMPTS; attempt += 1) {
+      expect((await statusOf(rollback.transactionId)).status).toBe("PENDING_REFERENCE");
+      await sql`UPDATE wager_transactions SET next_attempt_at = '2000-01-01T00:00:00Z' WHERE id = ${rollback.transactionId}`;
+      await retrier.execute();
+    }
+
+    expect(await statusOf(rollback.transactionId)).toEqual({
+      status: "REJECTED",
+      failure_code: "REFERENCE_NOT_PROCESSED",
+      attempts: DECIDED_MAX_ATTEMPTS,
+      next_attempt_at: null,
+    });
+    expect(await statusOf(refund.transactionId)).toMatchObject({ status: "PENDING_REFERENCE", attempts: 0 });
+    expect(await walletBalance(app, wallet.id)).toBe("100.00");
+  });
 
   test("a busy wallet is waited for, not skipped", async () => {
     const setup = await scenario(app);
