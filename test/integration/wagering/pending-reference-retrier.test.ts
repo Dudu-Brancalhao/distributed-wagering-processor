@@ -234,14 +234,19 @@ describe("worker: the retry window runs out", () => {
 describe("RetryPendingReferences tick", () => {
   let app: TestApp;
   let retrier: RetryPendingReferences;
+  /** Same application with a short `lock_timeout`, for the lock-timeout path. */
+  let impatientApp: TestApp;
 
   beforeAll(async () => {
-    app = await startTestApp();
+    // A lock wait far longer than the test needs, so a slow host cannot turn the busy-wallet wait into a timeout.
+    app = await startTestApp({ DB_LOCK_TIMEOUT_MS: "5000" });
     retrier = app.app.get(RetryPendingReferences);
+    impatientApp = await startTestApp({ DB_LOCK_TIMEOUT_MS: "200" });
   });
 
   afterAll(async () => {
     await app.close();
+    await impatientApp.close();
   });
 
   /** A REFUND whose BET has landed, made due ahead of any other pending transaction in the database. */
@@ -304,20 +309,22 @@ describe("RetryPendingReferences tick", () => {
     const setup = await scenario(app);
     const refundId = await dueRefund(setup);
     const before = await statusOf(refundId);
-    const retriesBefore = await metricValue(app, "wagering_retries_total", 'component="pending_reference"');
-    const timeoutsBefore = await metricValue(app, "wagering_lock_conflicts_total", 'reason="timeout"');
+    const retriesBefore = await metricValue(impatientApp, "wagering_retries_total", 'component="pending_reference"');
+    const timeoutsBefore = await metricValue(impatientApp, "wagering_lock_conflicts_total", 'reason="timeout"');
     const release = await lockWalletElsewhere(setup.wallet.id);
     try {
-      await retrier.execute();
+      await impatientApp.app.get(RetryPendingReferences).execute();
     } finally {
       await release();
     }
 
     expect(await statusOf(refundId)).toEqual(before);
-    expect(await metricValue(app, "wagering_retries_total", 'component="pending_reference"')).toBeGreaterThan(
+    expect(await metricValue(impatientApp, "wagering_retries_total", 'component="pending_reference"')).toBeGreaterThan(
       retriesBefore,
     );
-    expect(await metricValue(app, "wagering_lock_conflicts_total", 'reason="timeout"')).toBeGreaterThan(timeoutsBefore);
+    expect(await metricValue(impatientApp, "wagering_lock_conflicts_total", 'reason="timeout"')).toBeGreaterThan(
+      timeoutsBefore,
+    );
 
     await retrier.execute();
     expect((await statusOf(refundId)).status).toBe("PROCESSED");

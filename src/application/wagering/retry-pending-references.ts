@@ -19,7 +19,7 @@ import type { PendingReferenceTelemetry } from "./pending-reference-telemetry";
 import { lookUpReference } from "./reference-lookup";
 
 /** Candidates read per tick (spec 3.16 step 1). */
-export const PENDING_REFERENCE_BATCH_SIZE = 20;
+const PENDING_REFERENCE_BATCH_SIZE = 20;
 const MS_PER_SECOND = 1000;
 
 export interface RetryPendingReferencesDependencies {
