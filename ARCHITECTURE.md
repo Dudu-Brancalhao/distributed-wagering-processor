@@ -144,7 +144,7 @@ Toda referência é resolvida por `(providerId, referenceExternalTransactionId)`
 | Carteira muito disputada | Fila no lock, sem retries desperdiçados. Seção crítica curta: sem I/O de rede (o evento é um insert no outbox), uma carteira, cerca de 5 comandos. `lock_timeout` (2 s) transforma filas patológicas em erro transitório. |
 | Carteiras diferentes | Locks independentes, paralelismo total. |
 | Deadlock | Impossível: cada transação trava no máximo uma carteira, e o retentador a trava primeiro, na mesma ordem de todos. |
-| Ordem do broker | Só otimização. `MessageGroupId = walletId` reduz disputa, mas os testes de concorrência via SQS usam grupo aleatório para provar que a correção não depende disso. |
+| Ordem do broker | Só otimização. `MessageGroupId = walletId` reduz disputa, mas a correção não depende disso: as invariantes vivem no lock de linha e nas constraints. |
 
 **Defesa em profundidade:** o trigger `guard_wallet_update` recusa mudança de saldo sem `version` + 1, `CHECK (balance >= 0)` recusa negativos e o constraint trigger diferido `wallets_balance_change_requires_ledger_entry` recusa no commit saldo alterado sem lançamento.
 
@@ -152,7 +152,7 @@ Toda referência é resolvida por `(providerId, referenceExternalTransactionId)`
 
 **Custo:** a vazão de uma carteira é limitada pela seção crítica; aceitável, pois um jogador raramente gera centenas de operações por segundo, e carteiras diferentes escalam em paralelo.
 
-**Evidência:** no laboratório da especificação, 3 processos Bun reproduziram o cenário obrigatório (um `PROCESSED`, um `REJECTED`, saldo `20.00`, 1 débito), a mesma chave 50 vezes (1 processada, 49 replays) e 60 apostas de `10.00` sobre `100.00` (10 processadas, 50 rejeitadas, saldo `0.00`). Na implementação, `test/integration/wagering/mandatory-scenario.test.ts` cobre em processo o cenário obrigatório, a mesma aposta 50 vezes e 20 apostas distintas; a prova multiprocesso entregue é T-C1 (a mesma aposta 50 vezes em 3 processos via HTTP) e T-C2 (o cenário obrigatório com duas instâncias).
+**Evidência:** no laboratório da especificação, 3 processos Bun reproduziram o cenário obrigatório (um `PROCESSED`, um `REJECTED`, saldo `20.00`, 1 débito), a mesma chave 50 vezes (1 processada, 49 replays) e 60 apostas de `10.00` sobre `100.00` (10 processadas, 50 rejeitadas, saldo `0.00`). Na implementação, `test/integration/wagering/mandatory-scenario.test.ts` cobre em processo o cenário obrigatório, a mesma aposta 50 vezes e 20 apostas distintas; a prova com 3 processos reais via HTTP é T-C1 (a mesma aposta 50 vezes), T-C2 (o cenário obrigatório) e T-C3 (5 carteiras distintas recebendo apostas ao mesmo tempo, cada uma com saldo, versão e débitos esperados).
 
 ## 10. Garantias no schema do banco
 
@@ -283,7 +283,7 @@ Um `REFUND`, `ROLLBACK`, `WIN` ou `LOSS` cuja referência ainda não existe vira
 |---|---|---|
 | Unidade (`test/unit`) | nenhuma | Entregue: `Money`, `Wallet`, ledger, `WagerTransaction`, processador, eventos, hash, configuração, logger, borda HTTP e teste de arquitetura. |
 | Integração (`test/integration`) | PostgreSQL e MiniStack do Compose | Entregue: schema e constraints, mappers, filas, atomicidade, idempotência, API, reconciliação, cenário obrigatório em processo, inbox, retry e DLQ, desligamento, outbox e retentador. |
-| Concorrência (`test/concurrency`) | PostgreSQL, MiniStack e processos da aplicação | Parcial: T-C1 e T-C2 (`bun run test:concurrency`); T-C3 a T-C8 cortados. |
+| Concorrência (`test/concurrency`) | PostgreSQL, MiniStack e processos da aplicação | Parcial: T-C1 a T-C3, cada um com 3 processos (`bun run test:concurrency`), o que também cobre o item de ≥ 3 instâncias; T-C4 separado, variantes via SQS e T-C5 a T-C8 cortados (seção 18). |
 
 **Regras** ([spec 3.21](docs/spec.md#321-test-strategy)): infraestrutura real, sem mocks de `pg`, MikroORM ou SQS; isolamento sem limpeza (cada teste cria seus dados UUIDv7 e cada arquivo usa filas próprias, nada é truncado); no `afterEach`, `test/support/wallet-consistency.ts` verifica que saldo armazenado bate com o ledger, versões contíguas, encadeamento `balance_before`/`balance_after` e contagem de lançamentos; sem sleeps fixos, corridas partem de uma barreira; nenhum gancho de teste no código de produção.
 
@@ -291,21 +291,33 @@ Um `REFUND`, `ROLLBACK`, `WIN` ou `LOSS` cuja referência ainda não existe vira
 
 ## 18. Limitações conhecidas
 
+**Exigido pelo enunciado e não entregue (ou parcial):**
+
+- **Worker morto depois do commit e antes do ack** (§13, concorrência item 5): sem teste automatizado (T-C5). A correção se apoia no inbox e na deduplicação, cobertos por testes de integração de redelivery em processo.
+- **Reinício com prova de consistência final** (§13, concorrência item 8, e "recuperação após reinicialização" da lista de integração): sem teste automatizado (T-C8).
+- **Métrica de mensagens na DLQ** (§12): `wagering_dlq_messages_total` conta só as mensagens que o consumidor envia à DLQ; o gauge `wagering_dlq_depth` não foi construído, então mensagens levadas pela redrive policy não aparecem em métrica.
+- **Redação de logs** (§12), parcial: nenhum ponto de log grava valores, saldos ou payloads, mas não há a lista de `redact` do pino como segunda barreira.
+- **Dois publishers sobre o mesmo outbox** (§13, concorrência item 6), parcial: coberto por teste de integração com dois publicadores concorrentes no mesmo processo, não por processos separados (T-C6).
+- **Concorrência via SQS** (§5 e §8: a consistência não depende só do FIFO), parcial: as provas multiprocesso usam HTTP; as variantes via SQS com `MessageGroupId` aleatório não foram construídas. A garantia vem do lock de linha e das constraints, não do broker.
+- **`ROLLBACK` ou `REFUND` antes da referência** (§13, concorrência item 7), parcial: coberto por testes de integração do retentador (`REFUND` antes do `BET`, `ROLLBACK` antes do `WIN`), não por um teste paralelo via SQS (T-C7).
+
+Os itens 1 a 4 de concorrência têm teste com 3 processos reais da aplicação: T-C1 (a mesma aposta 50 vezes), T-C2 (o cenário obrigatório) e T-C3 (carteiras distintas em paralelo), em `bun run test:concurrency`.
+
+**Fora do escopo do enunciado:**
+
+- **Sem CI:** nenhum workflow roda lint, tipos ou testes automaticamente; o portão de qualidade é local (`bun run check`, `bun run test`).
+- **Sem teste de carga:** diferencial opcional, não agendado (OQ-06).
+- **Sem OpenAPI:** a API está descrita na seção 12, em [spec 3.13](docs/spec.md#313-http-api-and-status-mapping) e no `README.md`.
+- **Sem IdP real:** autenticação vale 0 pontos e o enunciado aceita o ponto de extensão no-op; nenhum provedor é autenticado e Keycloak ou Zitadel só estão no desenho (seção 16).
+
+**Limitações do desenho:**
+
 - **Vazão por carteira:** limitada pela seção crítica sob o lock de linha. Carteiras diferentes escalam em paralelo; uma única carteira muito quente não.
 - **Overflow de `numeric(20,2)`:** um crédito que passe de cerca de 10^18 unidades gera SQLSTATE `22003`, tratado como erro permanente (HTTP 500, DLQ no SQS).
 - **Lacuna residual do ledger:** um lançamento falso na versão 1 de uma carteira aberta com saldo zero passa pelas duas checagens diferidas; a reconciliação (soma e encadeamento) detecta.
 - **Retenção:** linhas antigas de `inbox_messages` (além dos 14 dias de retenção máxima do SQS) e linhas publicadas de `outbox_messages` poderiam ser expurgadas por um job futuro, não construído. Ledger e transações nunca são expurgados.
 - **Eventos:** entrega pelo menos uma vez, sem ordem entre agregados nem entre publicadores; consumidores deduplicam por `eventId` e ordenam eventos de saldo por `walletVersion`. Uma transação de outbox fica aberta por até 5 s durante o envio ao SQS.
 - **Latência de referências pendentes:** uma reversão que chega antes da referência espera o próximo degrau do backoff depois que a referência aparece, sem acordar dependentes na hora.
-- **Autenticação:** apenas o ponto de extensão no-op; nenhum provedor é autenticado e nenhum IdP (Keycloak ou Zitadel) é integrado; só o desenho está documentado (seção 16).
 - **`FAILED` sem evento:** transações `FAILED` são visíveis por log, métrica e consulta, não por evento de integração.
 - **Double-entry, OpenTelemetry e dashboards:** não construídos (OQ-06).
 - **LocalStack:** documentado como alternativa, mas apenas o MiniStack é testado.
-
-**Cortado por prazo.** Os itens abaixo estão na especificação, mas não foram construídos:
-
-- **Queda depois do commit e reinício:** não há teste automatizado de um worker morto entre o commit e o ack do SQS (T-C5) nem de reinício com prova de consistência final (T-C8). A correção nesses casos se apoia no inbox e na deduplicação, cobertos por testes de integração em processo.
-- **Concorrência além da prova mínima:** só T-C1 e T-C2 existem. Carteiras distintas em paralelo (T-C3), 3 processos simultâneos (T-C4), dois publicadores no mesmo outbox (T-C6) e as variantes de corrida via SQS (T-C7) não têm teste.
-- **Observabilidade incompleta:** sem o gauge de profundidade da DLQ (`wagering_dlq_depth`), então mensagens levadas à DLQ pela redrive policy não aparecem em métrica, e sem a lista de `redact` do pino (seção 16).
-- **Sem CI:** nenhum workflow roda lint, tipos ou testes automaticamente; o portão de qualidade é local (`bun run check`, `bun run test`).
-- **Sem teste de carga** e **sem OpenAPI** (a API está descrita na seção 12, em [spec 3.13](docs/spec.md#313-http-api-and-status-mapping) e no `README.md`).

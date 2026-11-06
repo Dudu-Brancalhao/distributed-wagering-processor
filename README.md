@@ -20,7 +20,7 @@ A entrega foi dividida em PRs por slice (seção 5 de `docs/spec.md`). Este READ
 | Schema PostgreSQL, persistência, casos de uso e API HTTP | S-03, S-04 | Entregue |
 | Consumidor SQS, publicador do outbox, retentativa de `PENDING_REFERENCE` | S-05, S-06, S-07 | Entregue |
 | Observabilidade | S-08 | Parcial: logs com contexto e métricas entregues; amostrador de profundidade da DLQ e `redact` do pino não construídos |
-| Suíte de concorrência e recuperação | S-09 | Parcial: só a prova de concorrência (T-C1, T-C2), em PR próprio; T-C3 a T-C8 cortados |
+| Suíte de concorrência e recuperação | S-09 | Parcial: só a prova de concorrência (T-C1 a T-C3, com 3 processos); T-C4 separado e T-C5 a T-C8 cortados |
 
 ## Pré-requisitos
 
@@ -138,7 +138,7 @@ curl -s "localhost:3003/wallets/$WALLET/ledger" | jq '[.items[] | select(.direct
 
 Resultado esperado: uma resposta `201` com `"status":"PROCESSED"` e outra `422` com `"status":"REJECTED"` e `"failureCode":"INSUFFICIENT_FUNDS"`; saldo final `{"amount":"20.00","currency":"BRL"}`; exatamente `1` lançamento de débito. Repetir as duas chamadas `bet` com os mesmos ids devolve as mesmas respostas com `"idempotentReplay":true` e não muda o saldo nem o ledger.
 
-O mesmo cenário é verificado automaticamente em `test/integration/wagering/mandatory-scenario.test.ts` (em processo, com requisições paralelas reais contra o PostgreSQL). A versão com duas instâncias (T-C2 em `docs/spec.md`) faz parte da prova de concorrência (`bun run test:concurrency`).
+O mesmo cenário é verificado automaticamente em `test/integration/wagering/mandatory-scenario.test.ts` (em processo, com requisições paralelas reais contra o PostgreSQL). A versão com 3 processos (T-C2 em `docs/spec.md`) faz parte da prova de concorrência (`bun run test:concurrency`).
 
 ## Scripts
 
@@ -155,7 +155,7 @@ O mesmo cenário é verificado automaticamente em `test/integration/wagering/man
 | `bun run sqs:setup` | Cria as filas SQS de forma idempotente. |
 | `bun run test:unit` | Testes de unidade, em paralelo. |
 | `bun run test:integration` | Testes de integração contra PostgreSQL e MiniStack reais. |
-| `bun run test:concurrency` | Prova de concorrência (pasta `test/concurrency`, T-C1 e T-C2). |
+| `bun run test:concurrency` | Prova de concorrência (pasta `test/concurrency`, T-C1 a T-C3). |
 | `bun run test` | Unidade e integração. |
 
 Os scripts que acessam infraestrutura leem a configuração do ambiente (`DATABASE_URL`, `SQS_ENDPOINT` etc.); a lista completa de variáveis, com valores padrão, está na seção 3.19 de `docs/spec.md` e é validada com Zod na inicialização.
@@ -188,7 +188,7 @@ docker compose up -d postgres sqs
 bun run test:concurrency
 ```
 
-Cobre T-C1 (a mesma aposta 50 vezes em paralelo) e T-C2 (o cenário obrigatório com duas instâncias). A pasta `test/concurrency` chega com o PR da prova de concorrência; sem ele, o script não encontra testes. Os demais cenários da especificação (T-C3 a T-C8: carteiras distintas em paralelo, 3 processos, worker morto entre o commit e o ack, dois publicadores no mesmo outbox, `REFUND`/`ROLLBACK` antes da referência via SQS e reinício com prova de consistência) foram cortados; ver Limitações conhecidas em `ARCHITECTURE.md`.
+Cobre, com 3 processos reais da aplicação, T-C1 (a mesma aposta 50 vezes em paralelo), T-C2 (o cenário obrigatório) e T-C3 (carteiras distintas em paralelo). Os demais cenários da especificação (worker morto entre o commit e o ack, dois publicadores no mesmo outbox, `REFUND`/`ROLLBACK` antes da referência via SQS e reinício com prova de consistência) foram cortados; ver Limitações conhecidas em `ARCHITECTURE.md`.
 
 ## Usando LocalStack no lugar do MiniStack
 
