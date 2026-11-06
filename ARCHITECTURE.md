@@ -30,7 +30,7 @@ A especificação detalhada, com requisitos rastreáveis (`R-xx`), testes (`T-xx
 
 ## 1. Diagrama do sistema
 
-> Espaço reservado para o diagrama de system design, desenhado à mão e adicionado por uma pessoa do time. Este documento descreve componentes, fluxos e fronteiras em texto e tabelas.
+![Diagrama de system design](docs/system-design.png)
 
 ## 2. Estado da implementação
 

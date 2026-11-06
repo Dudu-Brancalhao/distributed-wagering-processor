@@ -6,6 +6,10 @@ Serviço de carteira e processamento de apostas (desafio técnico Jungle Gaming)
 - Especificação de implementação: [`docs/spec.md`](docs/spec.md)
 - Decisões, trade-offs e limitações: [`ARCHITECTURE.md`](ARCHITECTURE.md)
 
+## Diagrama do sistema
+
+![Diagrama de system design](docs/system-design.png)
+
 ## Estado da implementação
 
 A entrega foi dividida em PRs por slice (seção 5 de `docs/spec.md`). Este README descreve o que está na branch principal; o que ficou de fora está em [`ARCHITECTURE.md`, Limitações conhecidas](ARCHITECTURE.md#21-limitações-conhecidas).
