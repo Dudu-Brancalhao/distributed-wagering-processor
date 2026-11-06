@@ -10,6 +10,8 @@ import type { WageringMetrics } from "./application/ports/wagering-metrics.port"
 import type { WalletRepository } from "./application/ports/wallet.repository";
 import { UniqueRaceRetry } from "./application/shared/unique-race-retry";
 import { GetWagerTransaction } from "./application/wagering/get-wager-transaction";
+import { PendingReferenceTelemetry } from "./application/wagering/pending-reference-telemetry";
+import { RetryPendingReferences } from "./application/wagering/retry-pending-references";
 import { SubmissionTelemetry } from "./application/wagering/submission-telemetry";
 import { SubmitWagerTransaction } from "./application/wagering/submit-wager-transaction";
 import { CreateWallet } from "./application/wallets/create-wallet";
@@ -39,9 +41,10 @@ const USE_CASES = [
   GetWallet,
   ListWalletLedger,
   ReconcileWallet,
+  RetryPendingReferences,
 ];
 
-/** Builds the framework-free use cases from their ports. Shared by every driving adapter (HTTP now, SQS later). */
+/** Builds the framework-free use cases from their ports. Shared by every driving adapter (HTTP now, SQS later) and the workers. */
 @Global()
 @Module({
   providers: [
@@ -152,6 +155,50 @@ const USE_CASES = [
       inject: [LEDGER_REPOSITORY, WAGERING_METRICS, APP_LOGGER],
       useFactory: (ledger: LedgerRepository, metrics: WageringMetrics, logger: AppLogger) =>
         new ReconcileWallet(ledger, metrics, logger),
+    },
+    {
+      provide: PendingReferenceTelemetry,
+      inject: [APP_LOGGER, WAGERING_METRICS],
+      useFactory: (logger: AppLogger, metrics: WageringMetrics) => new PendingReferenceTelemetry(logger, metrics),
+    },
+    {
+      provide: RetryPendingReferences,
+      inject: [
+        UNIT_OF_WORK,
+        WALLET_REPOSITORY,
+        WAGER_TRANSACTION_REPOSITORY,
+        LEDGER_REPOSITORY,
+        OUTBOX_REPOSITORY,
+        WagerTransactionProcessor,
+        CLOCK,
+        ID_GENERATOR,
+        WAGERING_METRICS,
+        PendingReferenceTelemetry,
+      ],
+      useFactory: (
+        unitOfWork: UnitOfWork,
+        wallets: WalletRepository,
+        transactions: WagerTransactionRepository,
+        ledger: LedgerRepository,
+        outbox: OutboxRepository,
+        processor: WagerTransactionProcessor,
+        clock: Clock,
+        ids: IdGenerator,
+        metrics: WageringMetrics,
+        telemetry: PendingReferenceTelemetry,
+      ) =>
+        new RetryPendingReferences({
+          unitOfWork,
+          wallets,
+          transactions,
+          ledger,
+          outbox,
+          processor,
+          clock,
+          ids,
+          metrics,
+          telemetry,
+        }),
     },
   ],
   exports: USE_CASES,

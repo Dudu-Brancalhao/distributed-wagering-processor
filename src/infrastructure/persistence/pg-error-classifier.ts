@@ -2,6 +2,7 @@ import {
   ApplicationError,
   DuplicateRecordError,
   type DuplicateRecordKind,
+  IntegrityViolationError,
   TransientInfrastructureError,
 } from "../../application/errors";
 
@@ -15,6 +16,11 @@ const RACED_UNIQUE_CONSTRAINTS: Readonly<Record<string, DuplicateRecordKind>> = 
 
 const UNIQUE_VIOLATION = "23505";
 const LOCK_NOT_AVAILABLE = "55P03";
+
+/** SQLSTATE class 23: integrity constraint violations, including the guard triggers' `restrict_violation`. */
+const INTEGRITY_VIOLATION_CLASS = "23";
+/** Data exceptions that validation cannot prevent: string too long (22001) and numeric overflow (22003). */
+const DATA_EXCEPTION_SQLSTATES: ReadonlySet<string> = new Set(["22001", "22003"]);
 
 /** Server-side SQLSTATEs that are temporary: retrying the same unit of work can succeed. */
 const TRANSIENT_SQLSTATES: ReadonlySet<string> = new Set([
@@ -59,6 +65,9 @@ export function classifyDatabaseError(error: unknown): unknown {
     return new TransientInfrastructureError(`Transient database error ${code}`, "database_unavailable", {
       cause: error,
     });
+  }
+  if (typeof code === "string" && (code.startsWith(INTEGRITY_VIOLATION_CLASS) || DATA_EXCEPTION_SQLSTATES.has(code))) {
+    return new IntegrityViolationError(`Database integrity error ${code}`, { cause: error });
   }
   if (isClientFailure(code, message)) {
     return new TransientInfrastructureError("Database unreachable", "database_unavailable", { cause: error });
