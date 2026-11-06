@@ -14,10 +14,10 @@ const SEND_TIMEOUT_MS = 5000;
  * Publishes outbox messages to the events FIFO queue (`wagering-events.fifo`, OQ-16). The event id as deduplication id
  * lets SQS drop a republished batch within its 5-minute window.
  *
- * Ordering within an aggregate is best-effort: the aggregate's message group keeps its events in order when a whole
- * batch succeeds or fails, but a partial-entry failure can reorder them, because a later event may be published while
- * an earlier one waits out its retry backoff. Consumers deduplicate by `eventId` and order balance events by
- * `WalletBalanceChanged.walletVersion` (spec 3.15).
+ * Ordering within an aggregate is best-effort: the aggregate's message group keeps its events in order only while every
+ * send succeeds. Any failed send, whether of one entry or of the whole batch, can let a later event of the aggregate be
+ * published while an earlier one waits out its retry backoff. Consumers deduplicate by `eventId` and order balance
+ * events by `WalletBalanceChanged.walletVersion` (spec 3.15).
  */
 export class SqsEventPublisher implements EventPublisher {
   private queueUrl?: Promise<string>;
