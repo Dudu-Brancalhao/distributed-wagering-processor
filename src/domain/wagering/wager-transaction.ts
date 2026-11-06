@@ -242,6 +242,15 @@ export class WagerTransaction {
     this._updatedAt = at;
   }
 
+  /** Whether the pending-reference retrier should retry it now: still waiting and its next attempt is due. */
+  isDueForReferenceRetry(at: Date): boolean {
+    return (
+      this._status === WagerTransactionStatus.PendingReference &&
+      this._nextAttemptAt !== undefined &&
+      this._nextAttemptAt.getTime() <= at.getTime()
+    );
+  }
+
   isTerminal(): boolean {
     return TERMINAL_STATUSES.has(this._status);
   }

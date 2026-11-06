@@ -90,6 +90,16 @@ describe("WagerTransaction transitions", () => {
     expect(refund.isTerminal()).toBe(true);
   });
 
+  test("isDueForReferenceRetry: only a PENDING_REFERENCE transaction whose next attempt has come", () => {
+    const refund = transaction(Kind.Refund, "5.00", { referenceExternalTransactionId: "bet-1" });
+    expect(refund.isDueForReferenceRetry(T1)).toBe(false);
+    refund.markPendingReference({ at: T0, nextAttemptAt: T1, observation });
+    expect(refund.isDueForReferenceRetry(new Date(T1.getTime() - 1))).toBe(false);
+    expect(refund.isDueForReferenceRetry(T1)).toBe(true);
+    refund.fail(FailureCode.ProcessingFailed, T1);
+    expect(refund.isDueForReferenceRetry(T1)).toBe(false);
+  });
+
   test("only a PENDING transaction with a reference can enter PENDING_REFERENCE", () => {
     expect(() =>
       transaction(Kind.Bet, "1.00").markPendingReference({ at: T0, nextAttemptAt: T1, observation }),

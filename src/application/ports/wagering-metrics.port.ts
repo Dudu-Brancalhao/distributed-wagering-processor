@@ -1,4 +1,4 @@
-export type TransactionSource = "http" | "sqs";
+export type TransactionSource = "http" | "sqs" | "pending_reference";
 export type DuplicateType = "inbox" | "idempotent_replay";
 export type RetryComponent = "sqs" | "outbox" | "pending_reference" | "unique_race";
 export type LockConflictReason = "timeout" | "unique_race";

@@ -16,6 +16,7 @@ import type { UniqueRaceRetry } from "../shared/unique-race-retry";
 import { decideIdempotency } from "./idempotency-decision";
 import { outboxMessagesFor } from "./outcome-events";
 import { PayloadHash } from "./payload-hash";
+import { lookUpReference } from "./reference-lookup";
 import type { SubmissionTelemetry } from "./submission-telemetry";
 import type { SubmitWagerTransactionCommand, SubmitWagerTransactionResult } from "./submit-wager-transaction.command";
 
@@ -118,12 +119,10 @@ export class SubmitWagerTransaction {
       correlationId: context.correlationId,
       createdAt: now,
     });
-    const reference = await this.resolveReference(command);
     const outcome = this.deps.processor.process({
       transaction,
       wallet,
-      reference,
-      referenceAlreadyReversed: await this.isAlreadyReversed(transaction, reference),
+      ...(await lookUpReference(this.deps.transactions, transaction)),
       entryId: this.deps.ids.next(),
       at: now,
     });
@@ -135,15 +134,5 @@ export class SubmitWagerTransaction {
     }
     this.deps.outbox.add(outboxMessagesFor({ transaction, wallet, entry }, eventContexts(this.deps.ids, context, now)));
     return transaction;
-  }
-
-  private async resolveReference(command: SubmitWagerTransactionCommand): Promise<WagerTransaction | undefined> {
-    if (command.referenceExternalTransactionId === undefined) return undefined;
-    return this.deps.transactions.findByExternalId(command.providerId, command.referenceExternalTransactionId);
-  }
-
-  private async isAlreadyReversed(transaction: WagerTransaction, reference?: WagerTransaction): Promise<boolean> {
-    if (!reference || !transaction.isReversal()) return false;
-    return this.deps.transactions.hasProcessedReversal(reference.id);
   }
 }

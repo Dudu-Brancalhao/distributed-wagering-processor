@@ -76,6 +76,14 @@ export class DuplicateRecordError extends ApplicationError {
   }
 }
 
+/**
+ * The database rejected a write with an integrity or data error outside the documented unique-key races (spec 3.10):
+ * a bug or a numeric overflow. Retrying cannot fix it.
+ */
+export class IntegrityViolationError extends ApplicationError {
+  readonly code = "INTEGRITY_VIOLATION";
+}
+
 export type TransientReason = "lock_timeout" | "database_unavailable" | "unique_race";
 
 /** A temporary infrastructure failure. Nothing was committed; retrying with the same idempotency key is safe. */
