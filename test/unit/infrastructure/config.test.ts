@@ -12,6 +12,7 @@ describe("configuration", () => {
     expect(config.PENDING_REFERENCE_MAX_ATTEMPTS).toBe(20);
     expect(config.PENDING_REFERENCE_RETRY_MAX_MS).toBe(300_000);
     expect(config.SQS_WAGER_QUEUE_NAME).toBe("wager-transactions.fifo");
+    expect(config.SQS_DLQ_DEPTH_SAMPLE_INTERVAL_MS).toBe(30_000);
   });
 
   test("parses and deduplicates roles", () => {

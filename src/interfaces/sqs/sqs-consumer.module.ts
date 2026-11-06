@@ -15,6 +15,7 @@ import { APP_LOGGER, WAGERING_METRICS } from "../../infrastructure/observability
 import { INBOX_REPOSITORY, UNIT_OF_WORK } from "../../infrastructure/persistence/persistence.tokens";
 import { CLOCK } from "../../infrastructure/runtime/runtime.tokens";
 import { SqsQueueGateway } from "../../infrastructure/sqs/sqs-queue-gateway";
+import { DeadLetterDepthSampler } from "./dead-letter-depth-sampler";
 import { WagerTransactionConsumer } from "./wager-transaction-consumer";
 import { WagerTransactionMessageHandler } from "./wager-transaction-message-handler";
 
@@ -27,7 +28,10 @@ const MS_PER_SECOND = 1000;
 const sqsRetrySchedule = (config: AppConfig) =>
   RetrySchedule.of({ baseMs: config.SQS_RETRY_BASE_S * MS_PER_SECOND, capMs: config.SQS_RETRY_MAX_S * MS_PER_SECOND });
 
-/** Role `consumer`: consumes `WagerTransactionRequested` messages through the same use case as the HTTP API. */
+/**
+ * Role `consumer`: consumes `WagerTransactionRequested` messages through the same use case as the HTTP API, and samples
+ * the depth of their dead-letter queue.
+ */
 @Module({
   providers: [
     {
@@ -99,6 +103,18 @@ const sqsRetrySchedule = (config: AppConfig) =>
           visibilityTimeoutS: config.SQS_VISIBILITY_TIMEOUT_S,
           shutdownGraceMs: config.SHUTDOWN_GRACE_MS,
           receiveRetrySchedule: sqsRetrySchedule(config),
+        }),
+    },
+    {
+      provide: DeadLetterDepthSampler,
+      inject: [SqsQueueGateway, WAGERING_METRICS, APP_LOGGER, APP_CONFIG],
+      useFactory: (gateway: SqsQueueGateway, metrics: WageringMetrics, logger: AppLogger, config: AppConfig) =>
+        new DeadLetterDepthSampler({
+          gateway,
+          queueName: config.SQS_WAGER_DLQ_NAME,
+          metrics,
+          logger,
+          intervalMs: config.SQS_DLQ_DEPTH_SAMPLE_INTERVAL_MS,
         }),
     },
   ],

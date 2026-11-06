@@ -25,6 +25,7 @@ export class PrometheusWageringMetrics implements WageringMetrics {
   private readonly reconciliationDivergences: Counter;
   private readonly outboxLag: Gauge;
   private readonly deadLetters: Counter<"reason">;
+  private readonly deadLetterDepth: Gauge<"queue">;
   private readonly contentionThresholdSeconds: number;
 
   constructor(registry: Registry, lockContentionThresholdMs: number) {
@@ -89,6 +90,12 @@ export class PrometheusWageringMetrics implements WageringMetrics {
       labelNames: ["reason"],
       registers,
     });
+    this.deadLetterDepth = new Gauge({
+      name: "wagering_dlq_depth",
+      help: "Messages waiting in the dead-letter queue, including redrive moves, sampled periodically",
+      labelNames: ["queue"],
+      registers,
+    });
   }
 
   transactionRecorded(labels: TransactionLabels): void {
@@ -132,5 +139,9 @@ export class PrometheusWageringMetrics implements WageringMetrics {
 
   deadLettered(reason: string): void {
     this.deadLetters.inc({ reason });
+  }
+
+  deadLetterDepthObserved(queue: string, depth: number): void {
+    this.deadLetterDepth.set({ queue }, depth);
   }
 }

@@ -19,8 +19,8 @@ A entrega foi dividida em PRs por slice (seção 5 de `docs/spec.md`). Este READ
 | Esqueleto, Compose, modelo de domínio | S-01, S-02 | Entregue |
 | Schema PostgreSQL, persistência, casos de uso e API HTTP | S-03, S-04 | Entregue |
 | Consumidor SQS, publicador do outbox, retentativa de `PENDING_REFERENCE` | S-05, S-06, S-07 | Entregue |
-| Observabilidade | S-08 | Parcial: logs com contexto e métricas entregues; amostrador de profundidade da DLQ e `redact` do pino não construídos |
-| Suíte de concorrência e recuperação | S-09 | Parcial: só a prova de concorrência (T-C1 a T-C3, com 3 processos); T-C4 separado e T-C5 a T-C8 cortados |
+| Observabilidade | S-08 | Parcial: logs com contexto e métricas entregues, inclusive a profundidade da DLQ; `redact` do pino não construído |
+| Suíte de concorrência e recuperação | S-09 | Parcial: T-C1 a T-C3 (concorrência com 3 processos), T-C5 (processo morto entre o commit e o ack) e T-C8 (reinício sob carga); T-C4 separado, T-C6 e T-C7 cortados |
 
 ## Pré-requisitos
 
@@ -155,7 +155,7 @@ O mesmo cenário é verificado automaticamente em `test/integration/wagering/man
 | `bun run sqs:setup` | Cria as filas SQS de forma idempotente. |
 | `bun run test:unit` | Testes de unidade, em paralelo. |
 | `bun run test:integration` | Testes de integração contra PostgreSQL e MiniStack reais. |
-| `bun run test:concurrency` | Prova de concorrência (pasta `test/concurrency`, T-C1 a T-C3). |
+| `bun run test:concurrency` | Prova de concorrência e recuperação (pasta `test/concurrency`: T-C1 a T-C3, T-C5 e T-C8). |
 | `bun run test` | Unidade e integração. |
 
 Os scripts que acessam infraestrutura leem a configuração do ambiente (`DATABASE_URL`, `SQS_ENDPOINT` etc.); a lista completa de variáveis, com valores padrão, está na seção 3.19 de `docs/spec.md` e é validada com Zod na inicialização.
@@ -179,7 +179,7 @@ docker compose up -d postgres sqs
 bun run test:integration
 ```
 
-Rodam contra o PostgreSQL e o MiniStack do Compose, sem mocks de `pg`, MikroORM ou do cliente SQS. O preload aplica as migrations no banco `wagering_test` (em `localhost:5432`). Cada teste cria suas próprias carteiras, jogadores e provedores, então nada é truncado entre execuções. Para usar outro banco, defina `TEST_DATABASE_URL`. A cobertura inclui migrations e constraints, provisionamento das filas, atomicidade de carteira, ledger e outbox, idempotência, a API HTTP, reconciliação, o cenário obrigatório, deduplicação do inbox, retry e DLQ do consumidor, desligamento gracioso, o publicador do outbox e o retentador de `PENDING_REFERENCE`.
+Rodam contra o PostgreSQL e o MiniStack do Compose, sem mocks de `pg`, MikroORM ou do cliente SQS. O preload aplica as migrations no banco `wagering_test` (em `localhost:5432`). Cada teste cria suas próprias carteiras, jogadores e provedores, então nada é truncado entre execuções. Para usar outro banco, defina `TEST_DATABASE_URL`. A cobertura inclui migrations e constraints, provisionamento das filas, atomicidade de carteira, ledger e outbox, idempotência, a API HTTP, reconciliação, o cenário obrigatório, deduplicação do inbox, retry e DLQ do consumidor, desligamento gracioso, o publicador do outbox, o retentador de `PENDING_REFERENCE` e a métrica de profundidade da DLQ.
 
 ### Concorrência
 
@@ -188,7 +188,7 @@ docker compose up -d postgres sqs
 bun run test:concurrency
 ```
 
-Cobre, com 3 processos reais da aplicação, T-C1 (a mesma aposta 50 vezes em paralelo), T-C2 (o cenário obrigatório) e T-C3 (carteiras distintas em paralelo). Os demais cenários da especificação (worker morto entre o commit e o ack, dois publicadores no mesmo outbox, `REFUND`/`ROLLBACK` antes da referência via SQS e reinício com prova de consistência) foram cortados; ver Limitações conhecidas em `ARCHITECTURE.md`.
+Sobe processos reais da aplicação e cobre T-C1 (a mesma aposta 50 vezes em paralelo), T-C2 (o cenário obrigatório) e T-C3 (carteiras distintas em paralelo), com 3 processos; T-C5 (um consumidor morto com `SIGKILL` depois do commit e antes do ack, com a mensagem reentregue a outro processo e um único débito); e T-C8 (as 3 instâncias mortas com `SIGKILL` no meio da carga e substituídas por processos novos, com prova de consistência final). Os demais cenários da especificação (dois publicadores no mesmo outbox em processos separados e `REFUND`/`ROLLBACK` antes da referência via SQS) foram cortados; ver Limitações conhecidas em `ARCHITECTURE.md`.
 
 ## Usando LocalStack no lugar do MiniStack
 

@@ -25,19 +25,30 @@ export interface TestQueues {
   readonly sqs: SQSClient;
 }
 
+export interface QueueAttributeOverrides {
+  readonly maxReceiveCount?: number;
+  readonly visibilityTimeoutS?: number;
+}
+
 /**
  * Creates the three FIFO queues under names unique to the caller (spec 3.21), with the production attributes unless
- * `maxReceiveCount` overrides the redrive limit.
+ * overridden: the redrive limit, or a short visibility timeout so a crashed consumer's message comes back quickly.
  */
-export async function provisionTestQueues({ maxReceiveCount }: { maxReceiveCount?: number } = {}): Promise<TestQueues> {
+export async function provisionTestQueues({
+  maxReceiveCount,
+  visibilityTimeoutS,
+}: QueueAttributeOverrides = {}): Promise<TestQueues> {
   const run = Bun.randomUUIDv7().slice(-12);
   const names = {
     SQS_WAGER_QUEUE_NAME: `wager-transactions-${run}.fifo`,
     SQS_WAGER_DLQ_NAME: `wager-transactions-dlq-${run}.fifo`,
     SQS_EVENTS_QUEUE_NAME: `wagering-events-${run}.fifo`,
   };
-  const redrive = maxReceiveCount === undefined ? {} : { SQS_MAX_RECEIVE_COUNT: String(maxReceiveCount) };
-  const config = loadConfig(sqsConfigSchema, { ...process.env, ...names, ...redrive });
+  const attributes = {
+    ...(maxReceiveCount === undefined ? {} : { SQS_MAX_RECEIVE_COUNT: String(maxReceiveCount) }),
+    ...(visibilityTimeoutS === undefined ? {} : { SQS_VISIBILITY_TIMEOUT_S: String(visibilityTimeoutS) }),
+  };
+  const config = loadConfig(sqsConfigSchema, { ...process.env, ...names, ...attributes });
   const sqs = createSqsClient(config);
   return { names, urls: await new SqsQueueProvisioner(sqs, config).provision(), sqs };
 }

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { RetryPendingReferences } from "../../../src/application/wagering/retry-pending-references";
 import { eventually } from "../../support/eventually";
+import { metricValue } from "../../support/metrics";
 import { sql } from "../../support/sql";
 import { startTestApp, type TestApp } from "../../support/test-app";
 import {
@@ -56,15 +57,6 @@ async function eventTypesOf(transactionId: string): Promise<string[]> {
 
 async function walletBalance(app: TestApp, walletId: string): Promise<string> {
   return (await app.request("GET", `/wallets/${walletId}`)).body.balance.amount;
-}
-
-/** The value of the `name` series carrying `label` (other labels, such as the instance, are ignored). */
-async function metricValue(app: TestApp, name: string, label: string): Promise<number> {
-  const response = await fetch(`${app.baseUrl}/metrics`);
-  const line = (await response.text())
-    .split("\n")
-    .find((candidate) => candidate.startsWith(`${name}{`) && candidate.includes(label));
-  return line ? Number(line.slice(line.lastIndexOf(" ") + 1)) : 0;
 }
 
 describe("worker: the reference arrives within the window", () => {
