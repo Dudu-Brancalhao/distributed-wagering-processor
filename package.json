@@ -15,7 +15,7 @@
     "sqs:setup": "bun scripts/setup-sqs.ts",
     "test:unit": "bun test --parallel test/unit",
     "test:integration": "bun test --timeout=30000 --preload ./test/support/integration-preload.ts test/integration",
-    "test:concurrency": "bun test --timeout=60000 test/concurrency",
+    "test:concurrency": "bun test --timeout=60000 --preload ./test/support/integration-preload.ts test/concurrency",
     "test": "bun run test:unit && bun run test:integration"
   },
   "dependencies": {
