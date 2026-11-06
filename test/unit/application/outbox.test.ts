@@ -50,6 +50,7 @@ class RecordingMetrics implements WageringMetrics {
   processingObserved(): void {}
   reconciliationDivergence(): void {}
   deadLettered(): void {}
+  deadLetterDepthObserved(): void {}
 
   retried(component: RetryComponent): void {
     this.retries.push(component);

@@ -28,6 +28,7 @@ export const sqsConfigSchema = z.object({
   SQS_HANDLER_CONCURRENCY: positiveInt(10),
   SQS_RETRY_BASE_S: positiveInt(2),
   SQS_RETRY_MAX_S: positiveInt(60),
+  SQS_DLQ_DEPTH_SAMPLE_INTERVAL_MS: positiveInt(30000),
 });
 
 export const databaseConfigSchema = z.object({

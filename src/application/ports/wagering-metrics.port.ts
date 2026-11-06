@@ -29,4 +29,6 @@ export interface WageringMetrics {
   /** Age of the oldest unpublished outbox message, sampled by the publisher (0 when nothing is waiting). */
   outboxLagObserved(seconds: number): void;
   deadLettered(reason: string): void;
+  /** Size of the dead-letter queue `queue`, sampled periodically; unlike `deadLettered` it includes redrive moves. */
+  deadLetterDepthObserved(queue: string, depth: number): void;
 }

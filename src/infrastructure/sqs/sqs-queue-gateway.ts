@@ -1,6 +1,7 @@
 import {
   ChangeMessageVisibilityCommand,
   DeleteMessageCommand,
+  GetQueueAttributesCommand,
   type Message,
   ReceiveMessageCommand,
   SendMessageCommand,
@@ -31,7 +32,7 @@ type GatewayConfig = Pick<
   "SQS_WAGER_QUEUE_NAME" | "SQS_WAGER_DLQ_NAME" | "SQS_WAIT_TIME_S" | "SQS_BATCH_SIZE"
 >;
 
-/** The consumer's operations on `wager-transactions.fifo` and its dead-letter queue (spec 3.14). */
+/** The consumer's operations on `wager-transactions.fifo` and its dead-letter queue (spec 3.14, 3.18). */
 export class SqsQueueGateway {
   constructor(
     private readonly sqs: SQSClient,
@@ -85,6 +86,17 @@ export class SqsQueueGateway {
         },
       }),
     );
+  }
+
+  /** Messages waiting in the dead-letter queue, whether this service or the redrive policy moved them there. */
+  async deadLetterDepth(): Promise<number> {
+    const { Attributes = {} } = await this.sqs.send(
+      new GetQueueAttributesCommand({
+        QueueUrl: await this.queues.urlOf(this.config.SQS_WAGER_DLQ_NAME),
+        AttributeNames: ["ApproximateNumberOfMessages"],
+      }),
+    );
+    return Number.parseInt(Attributes.ApproximateNumberOfMessages ?? "0", 10);
   }
 
   private wagerQueueUrl(): Promise<string> {

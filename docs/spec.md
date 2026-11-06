@@ -790,6 +790,7 @@ Validated with Zod at boot. Invalid configuration exits non-zero with a readable
 | `SQS_VISIBILITY_TIMEOUT_S` | `30` | Queue attribute. |
 | `SQS_WAIT_TIME_S`, `SQS_BATCH_SIZE`, `SQS_HANDLER_CONCURRENCY` | `20`, `10`, `10` | Consumer loop. |
 | `SQS_RETRY_BASE_S`, `SQS_RETRY_MAX_S` | `2`, `60` | Transient backoff. |
+| `SQS_DLQ_DEPTH_SAMPLE_INTERVAL_MS` | `30000` | `wagering_dlq_depth` sampling (3.18). |
 | `OUTBOX_POLL_INTERVAL_MS`, `OUTBOX_BATCH_SIZE` | `500`, `10` | Publisher. |
 | `OUTBOX_RETRY_BASE_MS`, `OUTBOX_RETRY_MAX_MS` | `1000`, `300000` | Publisher backoff. |
 | `PENDING_REFERENCE_POLL_INTERVAL_MS` | `1000` | Retrier. |
