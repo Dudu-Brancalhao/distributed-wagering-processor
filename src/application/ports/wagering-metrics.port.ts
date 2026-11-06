@@ -26,4 +26,6 @@ export interface WageringMetrics {
   lockConflict(reason: LockConflictReason): void;
   processingObserved(labels: ProcessingLabels, seconds: number): void;
   reconciliationDivergence(): void;
+  /** Age of the oldest unpublished outbox message, sampled by the publisher (0 when nothing is waiting). */
+  outboxLagObserved(seconds: number): void;
 }

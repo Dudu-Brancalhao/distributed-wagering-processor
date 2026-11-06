@@ -1,4 +1,4 @@
-import { Counter, Histogram, type Registry } from "prom-client";
+import { Counter, Gauge, Histogram, type Registry } from "prom-client";
 import type {
   DuplicateType,
   LockConflictReason,
@@ -23,6 +23,7 @@ export class PrometheusWageringMetrics implements WageringMetrics {
   private readonly lockConflicts: Counter<"reason">;
   private readonly processing: Histogram<"source" | "kind" | "outcome">;
   private readonly reconciliationDivergences: Counter;
+  private readonly outboxLag: Gauge;
   private readonly contentionThresholdSeconds: number;
 
   constructor(registry: Registry, lockContentionThresholdMs: number) {
@@ -76,6 +77,11 @@ export class PrometheusWageringMetrics implements WageringMetrics {
       help: "Wallet reconciliations that found the balance and the ledger diverging",
       registers,
     });
+    this.outboxLag = new Gauge({
+      name: "wagering_outbox_lag_seconds",
+      help: "Age of the oldest unpublished outbox message, sampled each publisher tick",
+      registers,
+    });
   }
 
   transactionRecorded(labels: TransactionLabels): void {
@@ -111,5 +117,9 @@ export class PrometheusWageringMetrics implements WageringMetrics {
 
   reconciliationDivergence(): void {
     this.reconciliationDivergences.inc();
+  }
+
+  outboxLagObserved(seconds: number): void {
+    this.outboxLag.set(seconds);
   }
 }

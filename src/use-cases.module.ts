@@ -201,6 +201,6 @@ const USE_CASES = [
         }),
     },
   ],
-  exports: USE_CASES,
+  exports: [...USE_CASES, CLOCK, ID_GENERATOR],
 })
 export class UseCasesModule {}

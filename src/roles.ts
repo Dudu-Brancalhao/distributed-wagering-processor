@@ -1,6 +1,7 @@
 import type { DynamicModule, Type } from "@nestjs/common";
 import type { AppRole } from "./infrastructure/config/config.schema";
 import { WageringApiModule } from "./interfaces/http/wagering-api.module";
+import { OutboxPublisherModule } from "./interfaces/workers/outbox-publisher.module";
 import { PendingReferenceWorkerModule } from "./interfaces/workers/pending-reference-worker.module";
 
 type RoleModule = Type<unknown> | DynamicModule;
@@ -12,7 +13,7 @@ type RoleModule = Type<unknown> | DynamicModule;
 const ROLE_MODULES: Readonly<Record<AppRole, readonly RoleModule[]>> = {
   api: [WageringApiModule],
   consumer: [],
-  outbox: [],
+  outbox: [OutboxPublisherModule],
   "pending-reference": [PendingReferenceWorkerModule],
 };
 

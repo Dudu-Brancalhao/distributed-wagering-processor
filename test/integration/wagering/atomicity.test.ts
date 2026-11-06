@@ -3,7 +3,6 @@ import { Writable } from "node:stream";
 import { EntityManager } from "@mikro-orm/postgresql";
 import { Test, type TestingModule } from "@nestjs/testing";
 import { AppModule } from "../../../src/app.module";
-import type { OutboxRepository } from "../../../src/application/ports/outbox.repository";
 import type { UnitOfWork } from "../../../src/application/ports/unit-of-work.port";
 import { SubmitWagerTransaction } from "../../../src/application/wagering/submit-wager-transaction";
 import type {
@@ -20,35 +19,42 @@ import { createMetricsRegistry } from "../../../src/infrastructure/observability
 import { createPino } from "../../../src/infrastructure/observability/pino-logger";
 import { OUTBOX_REPOSITORY, UNIT_OF_WORK } from "../../../src/infrastructure/persistence/persistence.tokens";
 import { MikroOrmOutboxRepository } from "../../../src/infrastructure/persistence/repositories/mikro-orm-outbox.repository";
+import {
+  provisionQueues,
+  type ReceivedEvent,
+  receiveEvents,
+  type TestQueues,
+  uniqueQueueNames,
+} from "../../support/event-queue";
 import { sql } from "../../support/sql";
 import { testConfig } from "../../support/test-config";
 import { newId, newProviderId } from "../../support/wagering-requests";
 import { checkWalletsAfterEach } from "../../support/wallet-consistency";
 
 /**
- * T-I2 (database part): the wallet, transaction, ledger entry, wallet change and outbox rows commit together or not
- * at all, and each outcome writes exactly the outbox events of spec 3.6.
+ * T-I2: the wallet, transaction, ledger entry, wallet change and outbox rows commit together or not at all, each
+ * outcome writes exactly the outbox events of spec 3.6, and the outbox publisher running alongside never sends an
+ * event of an aborted use case (E-06).
  */
 class OutboxFailure extends Error {}
 
 /** Really inserts the outbox rows inside the open transaction, then fails, so the rollback has something to undo. */
-class FailingOutbox implements OutboxRepository {
+class FailingOutbox extends MikroOrmOutboxRepository {
   armed = false;
 
-  constructor(
-    private readonly outbox: MikroOrmOutboxRepository,
-    private readonly em: EntityManager,
-  ) {}
+  constructor(private readonly entityManager: EntityManager) {
+    super(entityManager);
+  }
 
-  add(messages: readonly OutboxMessage[]): void {
-    this.outbox.add(messages);
+  override add(messages: readonly OutboxMessage[]): void {
+    super.add(messages);
     if (this.armed) {
       throw new OutboxFailure("outbox unavailable after insert");
     }
   }
 
   async flushThenFail(): Promise<never> {
-    await this.em.flush();
+    await this.entityManager.flush();
     throw new OutboxFailure("outbox failed after flushing its rows");
   }
 }
@@ -57,13 +63,18 @@ let moduleRef: TestingModule;
 let outbox: FailingOutbox;
 let unitOfWork: UnitOfWork;
 const touchedWallets = checkWalletsAfterEach();
-const config = testConfig();
+const queueNames = uniqueQueueNames();
+const config = testConfig({ APP_ROLES: "api,outbox", OUTBOX_POLL_INTERVAL_MS: "100", ...queueNames });
+let eventQueue: TestQueues;
+/** Booting the module opens its database pool and provisions the queues; Bun's default hook timeout is 5 s. */
+const STARTUP_TIMEOUT_MS = 30_000;
 
 beforeAll(async () => {
+  eventQueue = await provisionQueues(queueNames);
   const logger = createPino({
     level: "warn",
     instanceId: "atomicity",
-    roles: ["api"],
+    roles: config.APP_ROLES,
     destination: new Writable({ write: (_c, _e, done) => done() }),
   });
   moduleRef = await Test.createTestingModule({
@@ -72,7 +83,7 @@ beforeAll(async () => {
     .overrideProvider(OUTBOX_REPOSITORY)
     .useFactory({
       factory: (em: EntityManager) => {
-        outbox = new FailingOutbox(new MikroOrmOutboxRepository(em), em);
+        outbox = new FailingOutbox(em);
         return outbox;
       },
       inject: [EntityManager],
@@ -80,11 +91,11 @@ beforeAll(async () => {
     .compile();
   await moduleRef.init();
   unitOfWork = moduleRef.get<UnitOfWork>(UNIT_OF_WORK);
-});
+}, STARTUP_TIMEOUT_MS);
 
 afterAll(async () => {
   await moduleRef.close();
-});
+}, STARTUP_TIMEOUT_MS);
 
 const brl = (amount: string) => Money.from({ amount, currency: "BRL" });
 const origin = () => ({ correlationId: `corr-${newId()}`, causationId: newId() });
@@ -256,4 +267,42 @@ describe("the happy path commits every row together, with the outbox events of i
     expect(await rowCounts(wallet.id)).toEqual(after);
     expect(replay.events).toEqual([]);
   });
+});
+
+describe("E-06: no event reaches the queue when the use case aborts", () => {
+  test("only the committed submission's events are published", async () => {
+    const wallet = await openWallet("100.00");
+    const aborted = { ...origin(), source: "http" as const };
+    const abortedWalletOrigin = origin();
+    outbox.armed = true;
+    try {
+      const submission = moduleRef.get(SubmitWagerTransaction).execute(betCommand(wallet), aborted);
+      await expect(submission).rejects.toBeInstanceOf(OutboxFailure);
+      const creation = unitOfWork.isolated(() =>
+        moduleRef.get(CreateWallet).execute({ playerId: newId(), initialBalance: brl("100.00") }, abortedWalletOrigin),
+      );
+      await expect(creation).rejects.toBeInstanceOf(OutboxFailure);
+    } finally {
+      outbox.armed = false;
+    }
+    const committed = { ...origin(), source: "http" as const };
+    await moduleRef.get(SubmitWagerTransaction).execute(betCommand(wallet), committed);
+
+    const ofCorrelation = (correlationId: string) => (event: ReceivedEvent) =>
+      event.envelope.correlationId === correlationId;
+    const received = await receiveEvents(
+      eventQueue.sqs,
+      eventQueue.queues.eventsQueueUrl,
+      (events) => events.filter(ofCorrelation(committed.correlationId)).length === 2,
+      { timeoutMs: 15_000 },
+    );
+    expect(
+      received
+        .filter(ofCorrelation(committed.correlationId))
+        .map((event) => event.envelope.eventType)
+        .sort(),
+    ).toEqual(["WagerTransactionProcessed", "WalletBalanceChanged"]);
+    expect(received.filter(ofCorrelation(aborted.correlationId))).toEqual([]);
+    expect(received.filter(ofCorrelation(abortedWalletOrigin.correlationId))).toEqual([]);
+  }, 30_000);
 });
