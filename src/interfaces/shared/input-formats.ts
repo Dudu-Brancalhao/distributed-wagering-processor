@@ -23,6 +23,8 @@ export const externalIdField = visibleAscii(128);
 
 export const idempotencyKeyField = visibleAscii(255);
 
+export const messageIdField = visibleAscii(128);
+
 /** Parses through `Money.from`, so a JSON number, a third decimal or a lowercase currency is a validation error. */
 export const moneyField = z.object({ amount: z.unknown(), currency: z.unknown() }).transform((value, context) => {
   try {

@@ -44,7 +44,7 @@ export interface SubmitWagerTransactionDependencies {
 export class SubmitWagerTransaction {
   constructor(private readonly deps: SubmitWagerTransactionDependencies) {}
 
-  /** Owns its unit of work, so it also handles the unique-key race retry. */
+  /** Owns its unit of work, so it also handles the unique-key race retry and the telemetry. */
   async execute(
     command: SubmitWagerTransactionCommand,
     context: ExecutionContext,
@@ -60,7 +60,12 @@ export class SubmitWagerTransaction {
     }
   }
 
-  private async submit(
+  /**
+   * Joins the unit of work the caller already opened, for a driving adapter that writes more rows in the same SQL
+   * transaction (the SQS inbox). The caller owns that outermost unit of work, so it also owns the unique-key race
+   * retry and reports the outcome through `SubmissionTelemetry` once it committed.
+   */
+  async submit(
     command: SubmitWagerTransactionCommand,
     context: ExecutionContext,
   ): Promise<SubmitWagerTransactionResult> {

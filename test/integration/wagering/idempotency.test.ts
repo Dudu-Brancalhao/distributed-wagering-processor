@@ -1,6 +1,15 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { eventually } from "../../support/eventually";
+import {
+  consumerAppOverrides,
+  expectQueueDrained,
+  provisionTestQueues,
+  sendToWagerQueue,
+  wagerEnvelope,
+} from "../../support/sqs-test-queues";
 import { startTestApp, type TestApp } from "../../support/test-app";
 import { createWallet, newProviderId, submit, wagerBody } from "../../support/wagering-requests";
+import { inboxRow, transactionRows } from "../../support/wagering-rows";
 import { checkWalletsAfterEach } from "../../support/wallet-consistency";
 
 /** T-I3 (HTTP part): replays return the original result, conflicts are never replays. */
@@ -79,5 +88,40 @@ describe("idempotency over HTTP", () => {
       unknownField: "ignored",
     });
     expect(replay.body.idempotentReplay).toBe(true);
+  });
+});
+
+describe("idempotency across entry points", () => {
+  test("a request sent over HTTP and then over SQS with the same key is a replay", async () => {
+    const queues = await provisionTestQueues();
+    const consumer = await startTestApp(consumerAppOverrides(queues));
+    try {
+      const wallet = await createWallet(consumer, "100.00");
+      touchedWallets.add(wallet.id);
+      const providerId = newProviderId();
+      const bet = wagerBody({ providerId, wallet, kind: "BET", amount: "30.00" });
+      const idempotencyKey = `${providerId}:${bet.externalTransactionId}`;
+      const original = await submit(consumer, bet, idempotencyKey);
+      expect(original.status).toBe(201);
+
+      const message = wagerEnvelope({ ...bet, idempotencyKey });
+      await sendToWagerQueue(queues, message);
+      await eventually(async () => expect((await inboxRow(message.messageId))?.processed_at).toBeInstanceOf(Date), {
+        timeoutMs: 20_000,
+      });
+      await eventually(() => expectQueueDrained(queues, queues.urls.wagerQueueUrl), { timeoutMs: 10_000 });
+      expect(await transactionRows(providerId)).toMatchObject([
+        { id: original.body.transactionId, status: "PROCESSED" },
+      ]);
+      expect(
+        consumer.logLines.some((line) => line.includes('"idempotency.replay"') && line.includes(message.messageId)),
+      ).toBe(true);
+      expect((await consumer.request("GET", `/wallets/${wallet.id}`)).body.balance).toEqual({
+        amount: "70.00",
+        currency: "BRL",
+      });
+    } finally {
+      await consumer.close();
+    }
   });
 });

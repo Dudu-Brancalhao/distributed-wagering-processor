@@ -76,6 +76,15 @@ export class DuplicateRecordError extends ApplicationError {
   }
 }
 
+/** A message id was reused with a different payload: a producer contract violation (OQ-22). */
+export class InboxPayloadMismatchError extends ApplicationError {
+  readonly code = "INBOX_PAYLOAD_MISMATCH";
+
+  constructor(readonly messageId: string) {
+    super(`Message ${messageId} was already received with a different payload`);
+  }
+}
+
 /**
  * The database rejected a write with an integrity or data error outside the documented unique-key races (spec 3.10):
  * a bug or a numeric overflow. Retrying cannot fix it.

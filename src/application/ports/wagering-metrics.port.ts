@@ -28,4 +28,5 @@ export interface WageringMetrics {
   reconciliationDivergence(): void;
   /** Age of the oldest unpublished outbox message, sampled by the publisher (0 when nothing is waiting). */
   outboxLagObserved(seconds: number): void;
+  deadLettered(reason: string): void;
 }

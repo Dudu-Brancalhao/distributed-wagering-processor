@@ -140,10 +140,10 @@ describe("POST /wallets/:walletId/reconciliation", () => {
 });
 
 describe("edge endpoints", () => {
-  test("GET /health/ready reports PostgreSQL", async () => {
+  test("GET /health/ready reports PostgreSQL and SQS", async () => {
     const response = await app.request("GET", "/health/ready");
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ status: "ok", checks: { postgres: "ok" } });
+    expect(response.body).toEqual({ status: "ok", checks: { postgres: "ok", sqs: "ok" } });
   });
 
   test("an unknown route is a 404 with a machine-readable code", async () => {
