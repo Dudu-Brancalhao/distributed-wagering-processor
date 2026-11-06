@@ -1,6 +1,9 @@
 import { OutboxMessage } from "../../../domain/messaging/outbox-message";
 import { OutboxMessageRecord } from "../records/outbox-message.record";
 
+/** Length of the `last_error` column. */
+const LAST_ERROR_MAX_LENGTH = 512;
+
 export const OutboxMessageMapper = {
   toDomain(record: OutboxMessageRecord): OutboxMessage {
     return OutboxMessage.rehydrate({
@@ -27,5 +30,15 @@ export const OutboxMessageMapper = {
       publishedAt: message.publishedAt ?? null,
       lastError: null,
     });
+  },
+
+  /** The columns a publish attempt changes; `last_error` only when the attempt failed. */
+  attemptFields(message: OutboxMessage, lastError?: string): Partial<OutboxMessageRecord> {
+    return {
+      attempts: message.attempts,
+      nextAttemptAt: message.nextAttemptAt ?? message.occurredAt,
+      publishedAt: message.publishedAt ?? null,
+      ...(lastError === undefined ? {} : { lastError: lastError.slice(0, LAST_ERROR_MAX_LENGTH) }),
+    };
   },
 };
