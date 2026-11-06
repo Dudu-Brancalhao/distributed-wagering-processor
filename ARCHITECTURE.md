@@ -55,7 +55,7 @@ Todas as `OQ-xx` foram decididas em 2026-11-06; alternativas na [seção 4 de `d
 
 ## 3. Estado da implementação
 
-A entrega seguiu PRs por slice ([seção 5 de `docs/spec.md`](docs/spec.md#5-task-breakdown)); a situação de cada slice está no [`README.md`](README.md#estado-da-implementação). Os slices S-01 a S-07 (domínio, persistência, API HTTP, consumidor SQS, publicador do outbox e retentador) estão na branch principal. De S-08 e S-09 só parte foi construída; o que ficou de fora está na [seção 18](#18-limitações-conhecidas).
+A entrega seguiu PRs por slice ([seção 5 de `docs/spec.md`](docs/spec.md#5-task-breakdown)); a situação de cada slice está no [`README.md`](README.md#estado-da-implementação). Os slices S-01 a S-07 (domínio, persistência, API HTTP, consumidor SQS, publicador do outbox e retentador) estão na branch principal. De S-08 (observabilidade) falta só a lista de `redact` do pino; de S-09 (suíte de concorrência e recuperação) estão T-C1, T-C2, T-C3, T-C5 e T-C8. O que ficou de fora está na [seção 18](#18-limitações-conhecidas).
 
 ## 4. Visão geral, camadas e papéis
 
@@ -271,7 +271,7 @@ Um `REFUND`, `ROLLBACK`, `WIN` ou `LOSS` cuja referência ainda não existe vira
 
 **Logs** ([spec 3.18](docs/spec.md#318-observability)): pino em JSON no stdout, com contexto via AsyncLocalStorage (HTTP, mensagem, worker); cada linha traz `correlationId`, ids conhecidos (`messageId`, `transactionId`, `walletId`, `providerId`), `event` estável, `role` e `instanceId`. Nunca são logados valores, saldos, `playerId`, corpos, chaves de idempotência, headers além da correlação e receipt handles; a regra é seguida nos pontos de log, sem a lista de `redact` do pino (seção 18).
 
-**Métricas** (`GET /metrics`): `wagering_transactions_total`, `wagering_duplicates_total`, `wagering_idempotency_conflicts_total`, `wagering_retries_total{component}`, `wagering_dlq_messages_total`, `wagering_wallet_lock_wait_seconds`, `wagering_lock_conflicts_total`, `wagering_outbox_lag_seconds` (medido a cada tick do publicador), `wagering_processing_duration_seconds` e `wagering_reconciliation_divergences_total`.
+**Métricas** (`GET /metrics`): `wagering_transactions_total`, `wagering_duplicates_total`, `wagering_idempotency_conflicts_total`, `wagering_retries_total{component}`, `wagering_dlq_messages_total` (mensagens que o consumidor envia à DLQ), `wagering_dlq_depth{queue}` (tamanho da DLQ por `ApproximateNumberOfMessages`, amostrado pelo papel `consumer` a cada `SQS_DLQ_DEPTH_SAMPLE_INTERVAL_MS`, 30 s por padrão; inclui as mensagens levadas pela redrive policy), `wagering_wallet_lock_wait_seconds`, `wagering_lock_conflicts_total`, `wagering_outbox_lag_seconds` (medido a cada tick do publicador), `wagering_processing_duration_seconds` e `wagering_reconciliation_divergences_total`.
 
 **Health:** `/health/live` nunca toca dependências; `/health/ready` faz `SELECT 1` e `GetQueueAttributes` com timeout e responde 503 se algum falhar ou durante o desligamento.
 
@@ -281,25 +281,22 @@ Um `REFUND`, `ROLLBACK`, `WIN` ou `LOSS` cuja referência ainda não existe vira
 
 | Camada | Dependências | Situação |
 |---|---|---|
-| Unidade (`test/unit`) | nenhuma | Entregue: `Money`, `Wallet`, ledger, `WagerTransaction`, processador, eventos, hash, configuração, logger, borda HTTP e teste de arquitetura. |
-| Integração (`test/integration`) | PostgreSQL e MiniStack do Compose | Entregue: schema e constraints, mappers, filas, atomicidade, idempotência, API, reconciliação, cenário obrigatório em processo, inbox, retry e DLQ, desligamento, outbox e retentador. |
-| Concorrência (`test/concurrency`) | PostgreSQL, MiniStack e processos da aplicação | Parcial: T-C1 a T-C3, cada um com 3 processos (`bun run test:concurrency`), o que também cobre o item de ≥ 3 instâncias; T-C4 separado, variantes via SQS e T-C5 a T-C8 cortados (seção 18). |
+| Unidade (`test/unit`) | nenhuma | Entregue: `Money`, `Wallet`, ledger, `WagerTransaction`, processador, eventos, hash, configuração, logger, borda HTTP, amostrador da DLQ e teste de arquitetura. |
+| Integração (`test/integration`) | PostgreSQL e MiniStack do Compose | Entregue: schema e constraints, mappers, filas, atomicidade, idempotência, API, reconciliação, cenário obrigatório em processo, inbox, retry e DLQ, profundidade da DLQ (inclusive após redrive), desligamento, outbox e retentador. |
+| Concorrência (`test/concurrency`) | PostgreSQL, MiniStack e processos da aplicação | Parcial (`bun run test:concurrency`): T-C1 a T-C3 com 3 processos, o que também cobre o item de ≥ 3 instâncias; T-C5 (processo morto entre o commit e o ack) e T-C8 (reinício de todas as instâncias sob carga). T-C4 separado, T-C6, T-C7 e variantes via SQS cortados (seção 18). |
 
-**Regras** ([spec 3.21](docs/spec.md#321-test-strategy)): infraestrutura real, sem mocks de `pg`, MikroORM ou SQS; isolamento sem limpeza (cada teste cria seus dados UUIDv7 e cada arquivo usa filas próprias, nada é truncado); no `afterEach`, `test/support/wallet-consistency.ts` verifica que saldo armazenado bate com o ledger, versões contíguas, encadeamento `balance_before`/`balance_after` e contagem de lançamentos; sem sleeps fixos, corridas partem de uma barreira; nenhum gancho de teste no código de produção.
+**Regras** ([spec 3.21](docs/spec.md#321-test-strategy)): infraestrutura real, sem mocks de `pg`, MikroORM ou SQS; isolamento sem limpeza (cada teste cria seus dados UUIDv7 e cada arquivo usa filas próprias, nada é truncado); no `afterEach`, `test/support/wallet-consistency.ts` verifica que saldo armazenado bate com o ledger, versões contíguas, encadeamento `balance_before`/`balance_after` e contagem de lançamentos; sem sleeps fixos, corridas partem de uma barreira; nenhum gancho de teste no código de produção: as quedas usam entrypoints de teste (`test/support/entrypoints/`) que trocam um provider por uma versão que se mata com `SIGKILL` no ponto escolhido.
 
 ## 18. Limitações conhecidas
 
 **Exigido pelo enunciado e não entregue (ou parcial):**
 
-- **Worker morto depois do commit e antes do ack** (§13, concorrência item 5): sem teste automatizado (T-C5). A correção se apoia no inbox e na deduplicação, cobertos por testes de integração de redelivery em processo.
-- **Reinício com prova de consistência final** (§13, concorrência item 8, e "recuperação após reinicialização" da lista de integração): sem teste automatizado (T-C8).
-- **Métrica de mensagens na DLQ** (§12): `wagering_dlq_messages_total` conta só as mensagens que o consumidor envia à DLQ; o gauge `wagering_dlq_depth` não foi construído, então mensagens levadas pela redrive policy não aparecem em métrica.
 - **Redação de logs** (§12), parcial: nenhum ponto de log grava valores, saldos ou payloads, mas não há a lista de `redact` do pino como segunda barreira.
 - **Dois publishers sobre o mesmo outbox** (§13, concorrência item 6), parcial: coberto por teste de integração com dois publicadores concorrentes no mesmo processo, não por processos separados (T-C6).
-- **Concorrência via SQS** (§5 e §8: a consistência não depende só do FIFO), parcial: as provas multiprocesso usam HTTP; as variantes via SQS com `MessageGroupId` aleatório não foram construídas. A garantia vem do lock de linha e das constraints, não do broker.
+- **Concorrência via SQS** (§5 e §8: a consistência não depende só do FIFO), parcial: as provas de corrida multiprocesso (T-C1 a T-C3) usam HTTP, e T-C8 usa SQS para provar recuperação, não corrida; as variantes via SQS com `MessageGroupId` aleatório não foram construídas. A garantia vem do lock de linha e das constraints, não do broker.
 - **`ROLLBACK` ou `REFUND` antes da referência** (§13, concorrência item 7), parcial: coberto por testes de integração do retentador (`REFUND` antes do `BET`, `ROLLBACK` antes do `WIN`), não por um teste paralelo via SQS (T-C7).
 
-Os itens 1 a 4 de concorrência têm teste com 3 processos reais da aplicação: T-C1 (a mesma aposta 50 vezes), T-C2 (o cenário obrigatório) e T-C3 (carteiras distintas em paralelo), em `bun run test:concurrency`.
+Os itens 1 a 5 e 8 de concorrência têm teste com processos reais da aplicação, em `bun run test:concurrency`: T-C1 (a mesma aposta 50 vezes), T-C2 (o cenário obrigatório) e T-C3 (carteiras distintas em paralelo), com 3 processos; T-C5 (um consumidor que se mata com `SIGKILL` depois do commit e antes do `DeleteMessage`; outro processo recebe a mensagem após o visibility timeout, o inbox a reconhece como duplicata e há um único débito); e T-C8 (3 processos com todos os papéis mortos com `SIGKILL` no meio de carga HTTP e SQS, mensagens chegando com tudo parado e 3 processos novos assumindo: toda carteira bate com o ledger, nenhuma transação aplicada duas vezes, todo evento do outbox publicado e os replays seguem com `idempotentReplay: true`). A métrica de mensagens na DLQ (§12) é `wagering_dlq_depth`, que também conta as mensagens levadas pela redrive policy.
 
 **Limitações do desenho:**
 
