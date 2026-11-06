@@ -7,12 +7,14 @@ import { DatabaseHealthIndicator } from "./database-health-indicator";
 import { mikroOrmOptions } from "./mikro-orm.config";
 import { MikroOrmUnitOfWork } from "./mikro-orm-unit-of-work";
 import {
+  INBOX_REPOSITORY,
   LEDGER_REPOSITORY,
   OUTBOX_REPOSITORY,
   UNIT_OF_WORK,
   WAGER_TRANSACTION_REPOSITORY,
   WALLET_REPOSITORY,
 } from "./persistence.tokens";
+import { MikroOrmInboxRepository } from "./repositories/mikro-orm-inbox.repository";
 import { MikroOrmLedgerRepository } from "./repositories/mikro-orm-ledger.repository";
 import { MikroOrmOutboxRepository } from "./repositories/mikro-orm-outbox.repository";
 import { MikroOrmWagerTransactionRepository } from "./repositories/mikro-orm-wager-transaction.repository";
@@ -42,6 +44,7 @@ const withEntityManager = <T>(provide: InjectionToken, build: (em: EntityManager
     withEntityManager(WAGER_TRANSACTION_REPOSITORY, (em) => new MikroOrmWagerTransactionRepository(em)),
     withEntityManager(LEDGER_REPOSITORY, (em) => new MikroOrmLedgerRepository(em)),
     withEntityManager(OUTBOX_REPOSITORY, (em) => new MikroOrmOutboxRepository(em)),
+    withEntityManager(INBOX_REPOSITORY, (em) => new MikroOrmInboxRepository(em)),
     withEntityManager(DatabaseHealthIndicator, (em) => new DatabaseHealthIndicator(em, READINESS_TIMEOUT_MS)),
   ],
   exports: [
@@ -50,6 +53,7 @@ const withEntityManager = <T>(provide: InjectionToken, build: (em: EntityManager
     WAGER_TRANSACTION_REPOSITORY,
     LEDGER_REPOSITORY,
     OUTBOX_REPOSITORY,
+    INBOX_REPOSITORY,
     DatabaseHealthIndicator,
   ],
 })

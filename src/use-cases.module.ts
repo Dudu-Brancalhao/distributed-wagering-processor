@@ -44,7 +44,7 @@ const USE_CASES = [
   RetryPendingReferences,
 ];
 
-/** Builds the framework-free use cases from their ports. Shared by every driving adapter (HTTP now, SQS later) and the workers. */
+/** Builds the framework-free use cases from their ports. Shared by every driving adapter (HTTP, SQS) and the workers. */
 @Global()
 @Module({
   providers: [
@@ -201,6 +201,6 @@ const USE_CASES = [
         }),
     },
   ],
-  exports: [...USE_CASES, CLOCK, ID_GENERATOR],
+  exports: [...USE_CASES, UniqueRaceRetry, SubmissionTelemetry, CLOCK, ID_GENERATOR],
 })
 export class UseCasesModule {}

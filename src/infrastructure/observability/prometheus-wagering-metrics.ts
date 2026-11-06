@@ -24,6 +24,7 @@ export class PrometheusWageringMetrics implements WageringMetrics {
   private readonly processing: Histogram<"source" | "kind" | "outcome">;
   private readonly reconciliationDivergences: Counter;
   private readonly outboxLag: Gauge;
+  private readonly deadLetters: Counter<"reason">;
   private readonly contentionThresholdSeconds: number;
 
   constructor(registry: Registry, lockContentionThresholdMs: number) {
@@ -82,6 +83,12 @@ export class PrometheusWageringMetrics implements WageringMetrics {
       help: "Age of the oldest unpublished outbox message, sampled each publisher tick",
       registers,
     });
+    this.deadLetters = new Counter({
+      name: "wagering_dlq_messages_total",
+      help: "Messages this service moved to the dead-letter queue, by reason",
+      labelNames: ["reason"],
+      registers,
+    });
   }
 
   transactionRecorded(labels: TransactionLabels): void {
@@ -121,5 +128,9 @@ export class PrometheusWageringMetrics implements WageringMetrics {
 
   outboxLagObserved(seconds: number): void {
     this.outboxLag.set(seconds);
+  }
+
+  deadLettered(reason: string): void {
+    this.deadLetters.inc({ reason });
   }
 }

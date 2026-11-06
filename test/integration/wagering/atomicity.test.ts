@@ -3,7 +3,12 @@ import { Writable } from "node:stream";
 import { EntityManager } from "@mikro-orm/postgresql";
 import { Test, type TestingModule } from "@nestjs/testing";
 import { AppModule } from "../../../src/app.module";
+import { InboxPayloadHash } from "../../../src/application/messaging/inbox-payload-hash";
+import { ProcessWagerTransactionMessage } from "../../../src/application/messaging/process-wager-transaction-message";
+import type { InboxRepository } from "../../../src/application/ports/inbox.repository";
 import type { UnitOfWork } from "../../../src/application/ports/unit-of-work.port";
+import { UniqueRaceRetry } from "../../../src/application/shared/unique-race-retry";
+import { SubmissionTelemetry } from "../../../src/application/wagering/submission-telemetry";
 import { SubmitWagerTransaction } from "../../../src/application/wagering/submit-wager-transaction";
 import type {
   SubmittableKind,
@@ -16,9 +21,15 @@ import { FailureCode } from "../../../src/domain/wagering/failure-code";
 import { WagerTransactionKind } from "../../../src/domain/wagering/wager-transaction-kind";
 import { WagerTransactionStatus } from "../../../src/domain/wagering/wager-transaction-status";
 import { createMetricsRegistry } from "../../../src/infrastructure/observability/metrics-registry";
+import { APP_LOGGER, WAGERING_METRICS } from "../../../src/infrastructure/observability/observability.tokens";
 import { createPino } from "../../../src/infrastructure/observability/pino-logger";
-import { OUTBOX_REPOSITORY, UNIT_OF_WORK } from "../../../src/infrastructure/persistence/persistence.tokens";
+import {
+  INBOX_REPOSITORY,
+  OUTBOX_REPOSITORY,
+  UNIT_OF_WORK,
+} from "../../../src/infrastructure/persistence/persistence.tokens";
 import { MikroOrmOutboxRepository } from "../../../src/infrastructure/persistence/repositories/mikro-orm-outbox.repository";
+import { CLOCK } from "../../../src/infrastructure/runtime/runtime.tokens";
 import {
   provisionQueues,
   type ReceivedEvent,
@@ -305,4 +316,56 @@ describe("E-06: no event reaches the queue when the use case aborts", () => {
     expect(received.filter(ofCorrelation(aborted.correlationId))).toEqual([]);
     expect(received.filter(ofCorrelation(abortedWalletOrigin.correlationId))).toEqual([]);
   }, 30_000);
+});
+
+describe("the SQS entry point writes its inbox row in the same SQL transaction (inbox part)", () => {
+  const processMessage = () =>
+    new ProcessWagerTransactionMessage({
+      consumerName: "atomicity-test",
+      unitOfWork,
+      raceRetry: moduleRef.get(UniqueRaceRetry),
+      inbox: moduleRef.get<InboxRepository>(INBOX_REPOSITORY),
+      submitWagerTransaction: moduleRef.get(SubmitWagerTransaction),
+      clock: moduleRef.get(CLOCK),
+      telemetry: moduleRef.get(SubmissionTelemetry),
+      metrics: moduleRef.get(WAGERING_METRICS),
+      logger: moduleRef.get(APP_LOGGER),
+    });
+
+  const messageFor = (command: SubmitWagerTransactionCommand) => ({
+    messageId: newId(),
+    payloadHash: InboxPayloadHash.of({ externalTransactionId: command.externalTransactionId }),
+    command,
+  });
+
+  const inboxRows = async (messageId: string) => [
+    ...(await sql`SELECT processed_at FROM inbox_messages WHERE message_id = ${messageId}`),
+  ];
+
+  test("a failure after the outbox insert leaves no inbox row either", async () => {
+    const wallet = await openWallet("100.00");
+    const before = await rowCounts(wallet.id);
+    const message = messageFor(betCommand(wallet));
+    const context = { correlationId: message.messageId, causationId: message.messageId, source: "sqs" as const };
+    outbox.armed = true;
+    try {
+      await expect(processMessage().execute(message, context)).rejects.toBeInstanceOf(OutboxFailure);
+    } finally {
+      outbox.armed = false;
+    }
+    expect(await rowCounts(wallet.id)).toEqual(before);
+    expect(await inboxRows(message.messageId)).toEqual([]);
+    expect(await outboxEventTypes(message.messageId)).toEqual([]);
+  });
+
+  test("the happy path commits the inbox row, marked processed, with the effects and their events", async () => {
+    const wallet = await openWallet("100.00");
+    const message = messageFor(betCommand(wallet));
+    const context = { correlationId: message.messageId, causationId: message.messageId, source: "sqs" as const };
+    const outcome = await processMessage().execute(message, context);
+    expect(outcome.kind).toBe("submitted");
+    expect(await rowCounts(wallet.id)).toEqual({ transactions: 2, entries: 2, version: 2, balance: "90.00" });
+    expect(await inboxRows(message.messageId)).toEqual([{ processed_at: expect.any(Date) }]);
+    expect(await outboxEventTypes(message.messageId)).toEqual(["WagerTransactionProcessed", "WalletBalanceChanged"]);
+  });
 });

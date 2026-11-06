@@ -1,6 +1,11 @@
 import { Writable } from "node:stream";
 import type { INestApplication } from "@nestjs/common";
+import { Test, type TestingModuleBuilder } from "@nestjs/testing";
+import { AppModule } from "../../src/app.module";
 import { createApp } from "../../src/bootstrap";
+import { createMetricsRegistry } from "../../src/infrastructure/observability/metrics-registry";
+import { NestLoggerAdapter } from "../../src/infrastructure/observability/nest-logger.adapter";
+import { createPino } from "../../src/infrastructure/observability/pino-logger";
 import { testConfig } from "./test-config";
 
 export interface HttpResponse {
@@ -24,14 +29,46 @@ export interface TestApp {
 
 /** The real application (every adapter real) listening on a random port, with its log lines captured. */
 export async function startTestApp(overrides: Record<string, string> = {}): Promise<TestApp> {
-  const logLines: string[] = [];
+  const logs = captureLogs();
+  return listen(await createApp(testConfig(overrides), logs.sink), logs.lines);
+}
+
+/**
+ * The same application with providers replaced through `customize`, for fault injection without production hooks
+ * (spec 3.21).
+ */
+export async function startCustomizedTestApp(
+  overrides: Record<string, string>,
+  customize: (builder: TestingModuleBuilder) => TestingModuleBuilder,
+): Promise<TestApp> {
+  const config = testConfig(overrides);
+  const logs = captureLogs();
+  const logger = createPino({
+    level: config.LOG_LEVEL,
+    instanceId: config.INSTANCE_ID,
+    roles: config.APP_ROLES,
+    destination: logs.sink,
+  });
+  const registry = createMetricsRegistry(config.INSTANCE_ID);
+  const moduleRef = await customize(
+    Test.createTestingModule({ imports: [AppModule.forRoot({ config, logger, registry })] }),
+  ).compile();
+  const app = moduleRef.createNestApplication({ logger: new NestLoggerAdapter(logger) });
+  return listen(app, logs.lines);
+}
+
+function captureLogs() {
+  const lines: string[] = [];
   const sink = new Writable({
     write(chunk, _encoding, done) {
-      logLines.push(...String(chunk).split("\n").filter(Boolean));
+      lines.push(...String(chunk).split("\n").filter(Boolean));
       done();
     },
   });
-  const app = await createApp(testConfig(overrides), sink);
+  return { lines, sink };
+}
+
+async function listen(app: INestApplication, logLines: string[]): Promise<TestApp> {
   await app.listen(0);
   const baseUrl = await app.getUrl();
   return {

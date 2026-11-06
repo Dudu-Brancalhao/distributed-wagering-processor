@@ -1,4 +1,4 @@
-type JsonValue =
+export type JsonValue =
   | string
   | number
   | boolean
